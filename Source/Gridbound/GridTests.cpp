@@ -29,7 +29,7 @@ bool FGridRulesTest::RunTest(const FString& Parameters)
         Gravel+=Terrain==GridArt::ETerrain::Gravel;
     }
     TestEqual(TEXT("All 400 cells have a terrain type"),Grass+River+Gravel,400);
-    TestEqual(TEXT("Continuous two-cell-wide river"),River,40);
+    TestEqual(TEXT("Two-cell-wide river with a three-cell-wide crossing"),River,34);
     TestTrue(TEXT("Grass and gravel regions both exist"),Grass>0 && Gravel>0);
     for(int Yaw=0;Yaw<360;++Yaw)
     {

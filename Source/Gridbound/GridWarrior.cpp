@@ -9,7 +9,7 @@
 bool AGridPawn::SpawnWarrior(FIntPoint Cell)
 {
     if(!GridRules::Inside(Cell)) return false;
-    FTarget T; T.Cell=Cell; T.MoveDestination=Cell; T.FootHeight=SurfaceHeight(Cell);
+    FTarget T; T.Cell=Cell; T.HomeCell=Cell; T.MoveDestination=Cell; T.FootHeight=SurfaceHeight(Cell);
     T.Actor=MakeBlock(GridRules::Center(Cell,T.FootHeight+75),FVector(.65f,.65f,1.5f),FLinearColor(.9f,.12f,.07f));
     if(!T.Actor.IsValid()) return false;
     Cast<UStaticMeshComponent>(T.Actor->GetRootComponent())->SetVisibility(false);
@@ -33,6 +33,7 @@ bool AGridPawn::FindSpawnCell(FIntPoint Preferred,bool bForPlayer,FIntPoint& Res
     for(int32 X=0;X<GridRules::BoardSize;++X) for(int32 Y=0;Y<GridRules::BoardSize;++Y)
     {
         const FIntPoint C(X,Y);
+        if(bLevelMode && LevelBlocked(C)) continue;
         if(SurfaceHeight(C)>0.f) continue;
         if(!bForPlayer && (C==GridRules::Cell(GetActorLocation()) || (bMoving && C==Destination))) continue;
         bool bUnsafe=false;
@@ -75,27 +76,45 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next) cons
     const auto& T=Targets[Index];
     const FIntPoint Goal=GridRules::Cell(GetActorLocation());
     if(T.Cell==Goal) return false;
-    TArray<FIntPoint> Queue; Queue.Add(T.Cell);
+    TArray<FIntPoint> Open; Open.Add(T.Cell);
     TMap<FIntPoint,FIntPoint> Parents; Parents.Add(T.Cell,T.Cell);
+    TMap<FIntPoint,float> Costs; Costs.Add(T.Cell,0.f);
+    TSet<FIntPoint> Closed;
     const FIntPoint Directions[]={FIntPoint(1,0),FIntPoint(-1,0),FIntPoint(0,1),FIntPoint(0,-1)};
-    for(int32 Head=0;Head<Queue.Num();++Head)
+    while(!Open.IsEmpty())
     {
-        const FIntPoint From=Queue[Head];
+        int32 Best=0;
+        for(int32 N=1;N<Open.Num();++N) if(Costs[Open[N]]<Costs[Open[Best]]) Best=N;
+        const FIntPoint From=Open[Best]; Open.RemoveAtSwap(Best);
+        if(Closed.Contains(From)) continue;
+        Closed.Add(From);
+        if(From==Goal)
+        {
+            Next=From;
+            while(Parents[Next]!=T.Cell) Next=Parents[Next];
+            return true;
+        }
         for(const FIntPoint Direction:Directions)
         {
             const FIntPoint To=From+Direction;
-            if(!GridRules::Inside(To) || Parents.Contains(To) || EnemyCellOccupied(To,Index)) continue;
+            if(!GridRules::Inside(To) || Closed.Contains(To) || EnemyCellOccupied(To,Index)) continue;
+            if(bLevelMode && LevelBlocked(To)) continue;
             if(bMoving && To==Destination && To!=Goal) continue;
             const float FromHeight=From==T.Cell?T.FootHeight:SurfaceHeight(From);
-            if(!bAllowWalls && SurfaceHeight(To)>FromHeight+20.f) continue;
-            Parents.Add(To,From);
-            if(To==Goal)
+            const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+20.f;
+            float Cost=GridRules::WarriorStepSeconds/MovementSpeedMultiplier(To,SurfaceHeight(To));
+            if(bNeedsDemolition)
             {
-                Next=To;
-                while(Parents[Next]!=T.Cell) Next=Parents[Next];
-                return true;
+                if(!bAllowWalls) continue;
+                const FWall* Wall=Walls.FindByPredicate([To](const FWall& W){return W.Cell==To;});
+                if(!Wall) continue;
+                Cost+=FMath::CeilToFloat(float(Wall->Durability)/GridRules::SlashDemolition)*(GridRules::SlashCooldown+.45f);
             }
-            Queue.Add(To);
+            if(bLevelMode) for(const auto& B:BurningCells)
+                if(B.Cell==To && B.Remaining>0 && SurfaceHeight(To)<3) Cost+=T.Health<=30?30.f:8.f;
+            const float Candidate=Costs[From]+Cost;
+            if(!Costs.Contains(To) || Candidate<Costs[To])
+            { Costs.Add(To,Candidate); Parents.Add(To,From); Open.Add(To); }
         }
     }
     return false;
@@ -129,6 +148,7 @@ bool AGridPawn::TryWarriorSlash(int32 Index,int32 WallIndex)
 
 void AGridPawn::TickCombatants(float DeltaSeconds)
 {
+    if(bLevelMode) { TickLevelCombatants(DeltaSeconds); return; }
     const float DT=FMath::Max(0.f,DeltaSeconds);
     bool bAnyAlive=false;
     for(const auto& T:Targets) if(T.Health>0 && T.Actor.IsValid()) { bAnyAlive=true; break; }

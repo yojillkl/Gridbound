@@ -60,6 +60,10 @@ void AGridPawn::BeginPlay()
     Body->SetVisibility(false);
     Adventurer=GridArt::CreateAdventurer(this,RootComponent,TerrainMaterial,false);
     Adventurer->SetOwnerNoSee(true);
+    bLevelMode=!FParse::Param(FCommandLine::Get(),TEXT("GridboundSandbox"))
+        && !FParse::Param(FCommandLine::Get(),TEXT("GridboundCombatShowcase"))
+        && !FParse::Param(FCommandLine::Get(),TEXT("GridboundRainShowcase"));
+    if(bLevelMode) PlayerSpawnCell=FIntPoint(2,10);
     BuildArena(); ResetArena();
     if(auto* PC=Cast<APlayerController>(GetController()))
     {
@@ -108,6 +112,7 @@ void AGridPawn::BuildArena()
     // Non-blocking team-coloured spawn pads.
     for(bool bEnemy:{false,true})
     {
+        if(bLevelMode && bEnemy) continue;
         const FIntPoint Cell=bEnemy?EnemySpawnCell:PlayerSpawnCell;
         AActor* Pad=MakeBlock(GridRules::Center(Cell,3),FVector(1.1f,1.1f,.04f),
             bEnemy?FLinearColor(.8f,.12f,.035f):FLinearColor(.025f,.65f,1.f),false);
@@ -156,15 +161,17 @@ void AGridPawn::ResetArena()
         if(FindSpawnCell(Cell,false,SafeCell)) SpawnWarrior(SafeCell);
     }
     Feedback=TEXT("Q Fireball | E Earth Wall | R Rain | LMB cast | F5 reset");
+    if(bLevelMode) ResetLevel();
 }
 
 float AGridPawn::TakeDamage(float DamageAmount,const FDamageEvent& DamageEvent,AController* EventInstigator,AActor* DamageCauser)
 {
-    if(!FMath::IsFinite(DamageAmount) || DamageAmount<=0.f || Health<=0) return 0.f;
+    if(!FMath::IsFinite(DamageAmount) || DamageAmount<=0.f || Health<=0 || (bLevelMode && bLevelComplete)) return 0.f;
     const int32 Applied=FMath::Min(Health,FMath::CeilToInt(FMath::Min(DamageAmount,float(GridRules::MaxHealth))));
     Health-=Applied;
     if(Health==0)
     {
+        if(bLevelMode) ++LevelDeaths;
         RespawnRemaining=GridRules::PlayerRespawnDelay;
         bMoving=false; bWaitingForMoveChord=false; PendingMoveInput=FIntPoint::ZeroValue;
         Feedback=TEXT("Defeated. Respawning in 2 seconds...");
@@ -175,6 +182,7 @@ float AGridPawn::TakeDamage(float DamageAmount,const FDamageEvent& DamageEvent,A
 bool AGridPawn::CanEnter(FIntPoint Cell) const
 {
     if(!GridRules::Inside(Cell)) return false;
+    if(bLevelMode && LevelBlocked(Cell)) return false;
     if(SurfaceHeight(Cell)>FootHeight+20.f) return false;
     for(const auto& T:Targets) if(T.Health>0 && (T.Cell==Cell || (T.bWalking && T.MoveDestination==Cell))) return false;
     return true;
@@ -258,6 +266,7 @@ void AGridPawn::CastSkill(int32 Skill)
         Feedback=TEXT("Rain extinguishes fire / mud slows movement by 50% for 60s");
     }
     Cooldowns[Skill]=Skill==0?.6f:Skill==1?2.f:GridRules::RainCooldown;
+    if(bLevelMode) ++LevelCasts[Skill];
 }
 
 void AGridPawn::LaunchFireball(FVector Direction)
@@ -348,6 +357,7 @@ void AGridPawn::Tick(float DT)
     TickWetTerrain(DT);
     TickFireballs(DT);
     TickCombatants(DT);
+    if(bLevelMode) TickLevel(DT);
 #if !UE_BUILD_SHIPPING
     // Opt-in capture after exposure and atmospheric rendering have settled.
     static bool bArtCaptured=false;
@@ -360,6 +370,7 @@ void AGridPawn::Tick(float DT)
     auto* PC=Cast<APlayerController>(GetController()); if(!PC) return;
     if(PC->WasInputKeyJustPressed(EKeys::F5)) ResetArena();
     if(Health<=0) return;
+    if(bLevelMode && PC->WasInputKeyJustPressed(EKeys::F)) InteractLevel();
     float MX,MY; PC->GetInputMouseDelta(MX,MY);
     FRotator Rot=PC->GetControlRotation(); Rot.Yaw+=MX*MouseSensitivity; Rot.Pitch=FMath::Clamp(FRotator::NormalizeAxis(Rot.Pitch)+MY*MouseSensitivity,-85.f,85.f);
     PC->SetControlRotation(Rot);
@@ -401,11 +412,34 @@ void AGridHUD::DrawHUD()
     auto* P=Cast<AGridPawn>(GetOwningPawn()); if(!P || !Canvas) return;
     const float W=Canvas->SizeX,H=Canvas->SizeY;
     DrawRect(FLinearColor(0.015f,0.025f,0.045f,0.85f),20,20,680,190);
-    DrawText(TEXT("GRIDBOUND  /  FIRST-PERSON SPELLCASTING"),FLinearColor(0.25f,0.85f,1),36,32,nullptr,1.3f);
+    DrawText(TEXT("GRIDBOUND v0.2.0  /  FIRST-PERSON SPELLCASTING"),FLinearColor(0.25f,0.85f,1),36,32,nullptr,1.3f);
     DrawText(TEXT("WASD 8-way | Space jump | F5 reset | RMB rotate wall"),FLinearColor::White,36,63);
     DrawText(TEXT("Q Fireball | E Earth Wall | R Rain | LMB cast"),FLinearColor::White,36,85);
     DrawText(FString::Printf(TEXT("Fireball %.1fs | Wall %.1fs | Rain %.1fs | Speed %.0f%%"),P->Cooldowns[0],P->Cooldowns[1],P->Cooldowns[2],100*P->MovementSpeedMultiplier(P->CurrentCell,P->FootHeight)),FLinearColor(0.65f,0.8f,0.9f),36,110);
     DrawText(P->Feedback,FLinearColor(1,0.8f,0.35f),36,140);
+    if(P->bLevelMode)
+    {
+        DrawRect(FLinearColor(.015f,.025f,.04f,.88f),20,H-108,850,88);
+        DrawText(P->bLevelComplete?TEXT("ELEMENTAL CROSSING  /  COMPLETE"):TEXT("ELEMENTAL CROSSING  /  F interact with beacon"),FLinearColor(.45f,1,.7f),36,H-98,nullptr,1.1f);
+        DrawText(P->LevelObjective(),FLinearColor::White,36,H-72);
+        DrawText(FString::Printf(TEXT("Time %.0fs | Deaths %d | Q %d  E %d  R %d | F5 restart"),P->LevelSeconds,P->LevelDeaths,P->LevelCasts[0],P->LevelCasts[1],P->LevelCasts[2]),FLinearColor(.7f,.85f,.9f),36,H-46);
+        const float MapX=W-194,MapY=24,Size=8;
+        DrawRect(FLinearColor(.02f,.03f,.04f,.9f),MapX-6,MapY-6,172,194);
+        for(int32 X=0;X<20;++X) for(int32 Y=0;Y<20;++Y)
+        {
+            const FIntPoint Cell(X,Y);
+            FLinearColor Color=GridArt::TerrainAt(Cell)==GridArt::ETerrain::River?FLinearColor(.1f,.35f,.6f):FLinearColor(.24f,.38f,.2f);
+            if(P->LevelBlocked(Cell)) Color=GridArt::TerrainAt(Cell)==GridArt::ETerrain::River?Color:FLinearColor(.15f,.18f,.2f);
+            if(P->SurfaceHeight(Cell)>0 && !P->LevelBlocked(Cell)) Color=FLinearColor(.52f,.4f,.2f);
+            DrawRect(Color,MapX+X*Size,MapY+Y*Size,7,7);
+        }
+        const FIntPoint Goals[]={FIntPoint(5,10),FIntPoint(12,10),FIntPoint(18,10)};
+        for(int32 I=0;I<3;++I) DrawRect(I<P->LevelStage?FLinearColor::Green:FLinearColor(1,.75f,.1f),MapX+Goals[I].X*Size,MapY+Goals[I].Y*Size,7,7);
+        for(const auto& T:P->Targets) if(T.Health>0) DrawRect(FLinearColor::Red,MapX+T.Cell.X*Size,MapY+T.Cell.Y*Size,7,7);
+        const FIntPoint Position=GridRules::Cell(P->GetActorLocation());
+        DrawRect(FLinearColor(0,1,1),MapX+Position.X*Size,MapY+Position.Y*Size,7,7);
+        DrawText(TEXT("YOU cyan | GOAL gold"),FLinearColor::White,MapX,MapY+166);
+    }
     DrawRect(FLinearColor(.12f,.04f,.04f),36,174,200,12);
     DrawRect(FLinearColor(.15f,.8f,.35f),36,174,200.f*P->Health/GridRules::MaxHealth,12);
     DrawText(FString::Printf(TEXT("HP %d / %d"),P->Health,GridRules::MaxHealth),FLinearColor::White,250,170);
@@ -424,7 +458,7 @@ void AGridHUD::DrawHUD()
         {
             DrawRect(FLinearColor(0.06f,0.02f,0.02f,0.9f),Screen.X-36,Screen.Y,72,8);
             DrawRect(FLinearColor(0.9f,0.16f,0.08f),Screen.X-36,Screen.Y,72*T.Health/100.f,8);
-            DrawText(FString::Printf(TEXT("Warrior %d"),T.Health),FLinearColor::White,Screen.X-35,Screen.Y-20);
+            DrawText(FString::Printf(TEXT("%s %d"),T.Windup>0?TEXT("SLASH!"):T.AlertTime>0?TEXT("Warrior"):TEXT("Guard"),T.Health),T.Windup>0?FLinearColor(1,.7f,.1f):FLinearColor::White,Screen.X-35,Screen.Y-20);
         }
     }
     FHitResult WallHit; FCollisionQueryParams Params; Params.AddIgnoredActor(P);

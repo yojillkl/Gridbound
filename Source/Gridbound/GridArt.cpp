@@ -140,10 +140,47 @@ void GridArt::AnimateRain(AActor* Actor,float Age)
 
 GridArt::ETerrain GridArt::TerrainAt(FIntPoint Cell)
 {
+    if(Cell.Y>=9 && Cell.Y<=11 && Cell.X>=9 && Cell.X<=11) return ETerrain::Grass;
     const int32 RiverCenter=10+(Cell.Y<5?-1:Cell.Y<13?0:1);
     if(Cell.X==RiverCenter || Cell.X==RiverCenter+1) return ETerrain::River;
     if(Cell.X==RiverCenter-1 || Cell.X==RiverCenter+2 || (Cell.Y>=9 && Cell.Y<=11)) return ETerrain::Gravel;
     return ETerrain::Grass;
+}
+
+bool GridArt::CliffAt(FIntPoint C)
+{
+    if(C.X==0 || C.Y==0 || C.X==19 || C.Y==19) return true;
+    if((C.X==7 || C.X==13) && (C.Y<9 || C.Y>11)) return true;
+    return (C.X==4 && (C.Y==5 || C.Y==15)) || (C.X==16 && (C.Y==7 || C.Y==13));
+}
+
+bool GridArt::PlatformAt(FIntPoint C)
+{
+    return C.X>=17 && C.X<=18 && C.Y>=9 && C.Y<=11;
+}
+
+UProceduralMeshComponent* GridArt::CreateStone(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,float Height)
+{
+    FFacets Art;
+    const FVector2D Corners[]={{-67,-75},{67,-75},{75,-67},{75,67},{67,75},{-67,75},{-75,67},{-75,-67}};
+    for(int32 I=0;I<8;++I)
+    {
+        const FVector2D A=Corners[I],B=Corners[(I+1)%8];
+        Art.Quad(FVector(A,-Height/2),FVector(B,-Height/2),FVector(B,Height/2),FVector(A,Height/2),FLinearColor(.23f,.29f,.32f)*(.8f+.06f*(I%4)));
+        Art.Triangle(FVector(0,0,Height/2),FVector(A,Height/2),FVector(B,Height/2),FLinearColor(.32f,.39f,.38f));
+    }
+    return Art.Finish(Owner,Parent,Material);
+}
+
+UProceduralMeshComponent* GridArt::CreateBeacon(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,FLinearColor Color)
+{
+    FFacets Art;
+    Art.Cylinder(FVector(0,0,-60),28,24,18,FLinearColor(.25f,.3f,.34f));
+    Art.Cylinder(FVector(0,0,-42),12,12,55,FLinearColor(.45f,.4f,.24f));
+    Art.Cylinder(FVector(0,0,13),32,27,10,FLinearColor(.28f,.32f,.35f));
+    Art.Rock(FVector(0,0,50),FVector(20,20,30),Color,6);
+    Art.Rock(FVector(0,0,50),FVector(20,20,-25),Color*.7f,6);
+    return Art.Finish(Owner,Parent,Material);
 }
 
 UProceduralMeshComponent* GridArt::CreateFireball(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material)

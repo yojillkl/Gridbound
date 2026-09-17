@@ -16,7 +16,7 @@ float AGridPawn::SurfaceHeight(FIntPoint Cell) const
 {
     for(const auto& Wall:Walls) if(Wall.Cell==Cell && Wall.Actor.IsValid() && Wall.Durability>0)
         return GridRules::WallHeight*FMath::Clamp(Wall.Age/GridRules::WallRiseTime,.005f,1.f);
-    return 0.f;
+    return bLevelMode?LevelHeight(Cell):0.f;
 }
 
 void AGridPawn::UpdateElevation(float DeltaSeconds)
@@ -97,10 +97,12 @@ void AGridPawn::DamageWall(int32 Index,int32 Demolition)
 void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
 {
     if(!HitActor) return;
+    if(bLevelMode && LevelFireImpact(HitActor)) return;
     // Character damage and object demolition never share a health pool or application path.
     for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.Get()==HitActor)
     {
         Target.Health=FMath::Max(0,Target.Health-GridRules::FireballDamage);
+        Target.AlertTime=8.f;
         if(Target.Health==0) HitActor->Destroy();
         Feedback=TEXT("Fireball: 50 character damage");
         return;
@@ -125,7 +127,7 @@ void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
 
 bool AGridPawn::IgniteCell(FIntPoint Cell)
 {
-    if(!GridRules::Inside(Cell) || GridArt::TerrainAt(Cell)!=GridArt::ETerrain::Grass) return false;
+    if(!GridRules::Inside(Cell) || (bLevelMode && LevelBlocked(Cell)) || GridArt::TerrainAt(Cell)!=GridArt::ETerrain::Grass) return false;
     for(const auto& Mud:MuddyCells) if(Mud.Cell==Cell && Mud.Remaining>0.f) return false;
     for(auto& Burning:BurningCells) if(Burning.Cell==Cell)
     {

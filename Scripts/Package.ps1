@@ -1,6 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$EnginePath,
-    [string]$OutputPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Releases\v0.1.0'),
+    [string]$OutputPath = (Join-Path (Split-Path $PSScriptRoot -Parent) 'Releases\v0.2.0'),
     [ValidateSet('Development','Shipping')][string]$Configuration = 'Development'
 )
 $ErrorActionPreference = 'Stop'

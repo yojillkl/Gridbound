@@ -28,6 +28,7 @@ TArray<FIntPoint> AGridPawn::PlaceableWallCells(FIntPoint CenterCell) const
     for(const FIntPoint Cell:GridRules::WallCells(CenterCell,bWallAlongX))
     {
         if(!GridRules::Inside(Cell) || GridRules::Distance(CurrentCell,Cell)>GridRules::WallRange) continue;
+        if(bLevelMode && (LevelBlocked(Cell) || LevelHeight(Cell)>0.f)) continue;
         bool bOccupied=false;
         for(const auto& Wall:Walls) if(Wall.Actor.IsValid() && Wall.Cell==Cell) { bOccupied=true; break; }
         if(bOccupied) continue;
@@ -71,6 +72,7 @@ void AGridPawn::MakeMud(FIntPoint Cell)
 bool AGridPawn::CastRain(FIntPoint CenterCell)
 {
     if(!CanCastRain(CenterCell)) return false;
+    if(bLevelMode && LevelStage==1 && GridRules::RainCells(CenterCell).Contains(FIntPoint(12,10))) bRainSeal=true;
     for(const FIntPoint Cell:GridRules::RainCells(CenterCell))
     {
         if(!GridRules::Inside(Cell)) continue;

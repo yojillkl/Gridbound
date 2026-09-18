@@ -31,7 +31,7 @@ bool FGridMovementTest::RunTest(const FString& Parameters)
     const auto Reset=[Pawn]()
     {
         Pawn->ResetArena(); Pawn->CurrentCell=FIntPoint(3,3); Pawn->Destination=Pawn->CurrentCell;
-        Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+        Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     };
     Reset();
     TestTrue(TEXT("Grounded at spawn"),Pawn->IsGrounded());
@@ -58,7 +58,7 @@ bool FGridMovementTest::RunTest(const FString& Parameters)
     Pawn->AdvanceMovement(.13f);
     TestEqual(TEXT("Diagonal arrives at neighbour"),Pawn->CurrentCell,FIntPoint(4,4));
     TestFalse(TEXT("Diagonal ends on exact cell center"),Pawn->bMoving);
-    TestTrue(TEXT("Position remains centered"),Pawn->GetActorLocation().Equals(GridRules::Center(FIntPoint(4,4),75),.01));
+    TestTrue(TEXT("Position remains centered"),Pawn->GetActorLocation().Equals(GridRules::Center(FIntPoint(4,4),GridRules::ActorOriginHeight),.01));
     Reset(); Pawn->MakeMud(Pawn->CurrentCell);
     Pawn->TryStartMove(FIntPoint(1,1),0); Pawn->AdvanceMovement(.6f);
     TestTrue(TEXT("Mud also slows diagonals"),Pawn->bMoving);

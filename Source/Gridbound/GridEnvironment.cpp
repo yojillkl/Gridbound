@@ -9,7 +9,7 @@
 
 FVector AGridPawn::SpellOrigin() const
 {
-    return GetActorLocation()+FVector(0,0,GridRules::EyeHeight-75.f);
+    return GetActorLocation()+FVector(0,0,GridRules::EyeHeight-GridRules::ActorOriginHeight);
 }
 
 float AGridPawn::SurfaceHeight(FIntPoint Cell) const
@@ -47,12 +47,12 @@ void AGridPawn::UpdateElevation(float DeltaSeconds)
         else FootHeight=FMath::Max(Support,NextHeight);
     }
     else { FootHeight=Support; FallSpeed=0.f; bJumping=false; }
-    FVector Location=GetActorLocation(); Location.Z=FootHeight+75; SetActorLocation(Location);
+    FVector Location=GetActorLocation(); Location.Z=FootHeight+GridRules::ActorOriginHeight; SetActorLocation(Location);
     for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.IsValid())
     {
         FVector TargetLocation=Target.Actor->GetActorLocation();
         FollowSupport(SurfaceHeight(GridRules::Cell(TargetLocation)),Target.FootHeight,Target.FallSpeed);
-        TargetLocation.Z=Target.FootHeight+75;
+        TargetLocation.Z=Target.FootHeight+GridRules::ActorOriginHeight;
         Target.Actor->SetActorLocation(TargetLocation);
     }
 }
@@ -107,6 +107,8 @@ void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
         Feedback=TEXT("火球命中：造成 50 伤害");
         return;
     }
+    // Unreachable today: the fireball cannot strike the player who cast it, and no
+    // second player exists to be hit. Kept as a defensive fallback.
     if(auto* Character=Cast<AGridPawn>(HitActor))
     {
         Character->TakeDamage(GridRules::FireballDamage,FDamageEvent(),GetController(),this);
@@ -152,6 +154,15 @@ bool AGridPawn::IgniteCell(FIntPoint Cell)
 void AGridPawn::TickBurning(float DeltaSeconds)
 {
     const float DT=FMath::Max(0.f,DeltaSeconds);
+    // Damage fractions only accrue while standing on a live fire; a stale fraction
+    // from a fire the character has already left must not leak into the next ignite.
+    auto StillBurning=[this](FIntPoint Cell)
+    {
+        for(const auto& B:BurningCells) if(B.Cell==Cell && B.Remaining>0.f) return true;
+        return false;
+    };
+    if(!StillBurning(CurrentCell)) BurnFraction=0.f;
+    for(auto& Target:Targets) if(Target.Actor.IsValid() && !StillBurning(GridRules::Cell(Target.Actor->GetActorLocation()))) Target.BurnFraction=0.f;
     for(int32 I=BurningCells.Num()-1;I>=0;--I)
     {
         auto& Burning=BurningCells[I];
@@ -174,10 +185,10 @@ void AGridPawn::TickBurning(float DeltaSeconds)
             Fraction=FMath::Max(0.f,Fraction-Damage); return Damage;
         };
         // Raised characters are above the flames, not standing on the burning floor.
-        if(Health>0 && CurrentCell==Burning.Cell && FootHeight<=3.f)
+        if(Health>0 && CurrentCell==Burning.Cell && FootHeight<=GridRules::GroundTolerance)
             TakeDamage(Burn(BurnFraction),FDamageEvent(),nullptr,nullptr);
         for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.IsValid()
-            && GridRules::Cell(Target.Actor->GetActorLocation())==Burning.Cell && Target.FootHeight<=3.f)
+            && GridRules::Cell(Target.Actor->GetActorLocation())==Burning.Cell && Target.FootHeight<=GridRules::GroundTolerance)
         {
             Target.Health=FMath::Max(0,Target.Health-Burn(Target.BurnFraction));
             if(Target.Health==0 && Target.Actor.IsValid()) Target.Actor->Destroy();
@@ -208,7 +219,7 @@ void AGridPawn::SetupCombatShowcase()
 #if !UE_BUILD_SHIPPING
     // Opt-in deterministic visual QA; ordinary play never creates this scene.
     CurrentCell=FIntPoint(1,4); Destination=CurrentCell;
-    SetActorLocation(GridRules::Center(CurrentCell,75));
+    SetActorLocation(GridRules::Center(CurrentCell,GridRules::ActorOriginHeight));
     bWallAlongX=false; PlaceWall(FIntPoint(6,4)); TickWalls(.4f); UpdateElevation(.4f);
     for(int32 I=0;I<Walls.Num();++I)
     {

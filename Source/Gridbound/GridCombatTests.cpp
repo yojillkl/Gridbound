@@ -15,7 +15,7 @@ bool FGridCombatTest::RunTest(const FString& Parameters)
     GEngine->CreateNewWorldContext(EWorldType::Game).SetCurrentWorld(World);
     AGridPawn* Pawn=World->SpawnActor<AGridPawn>();
     if(!TestNotNull(TEXT("Player"),Pawn)) { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false; }
-    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     TestEqual(TEXT("Player starts with 100 HP"),Pawn->Health,100);
     TestEqual(TEXT("No spell selected at startup"),Pawn->SelectedSkill,INDEX_NONE);
     Pawn->CastSkill(INDEX_NONE);
@@ -33,7 +33,7 @@ bool FGridCombatTest::RunTest(const FString& Parameters)
     auto AddTarget=[&](FIntPoint Cell)
     {
         AGridPawn::FTarget Target; Target.Cell=Cell;
-        Target.Actor=Pawn->MakeBlock(GridRules::Center(Cell,75),FVector(.65f,.65f,1.5f),FLinearColor::Red);
+        Target.Actor=Pawn->MakeBlock(GridRules::Center(Cell,GridRules::ActorOriginHeight),FVector(.65f,.65f,1.5f),FLinearColor::Red);
         Pawn->Targets.Add(Target);
     };
     AddTarget(FIntPoint(6,10)); AddTarget(FIntPoint(8,10));

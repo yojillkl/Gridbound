@@ -23,7 +23,7 @@ bool FGridRainTest::RunTest(const FString& Parameters)
     AGridPawn* Pawn=World->SpawnActor<AGridPawn>();
     if(!TestNotNull(TEXT("Pawn"),Pawn)) { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false; }
     Pawn->CurrentCell=FIntPoint(3,6); Pawn->Destination=Pawn->CurrentCell;
-    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     const FIntPoint Grass(4,6),Gravel(4,9),Healthy(5,6),Outside(0,0);
     for(const auto Cell:{Grass,Gravel}) Pawn->TerrainTiles.Add(Cell,GridArt::CreateTile(World,Cell,Pawn->BaseMaterial));
     Pawn->IgniteCell(Grass); Pawn->IgniteCell(Outside);
@@ -36,7 +36,7 @@ bool FGridRainTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Character above mud is not slowed"),Pawn->MovementSpeedMultiplier(Grass,450),1.f);
     TestFalse(TEXT("Wet mud does not reignite"),Pawn->IgniteCell(Grass));
     Pawn->CurrentCell=Grass; Pawn->Destination=Grass+FIntPoint(1,0);
-    Pawn->SetActorLocation(GridRules::Center(Grass,75)); Pawn->bMoving=true; Pawn->MoveTime=0;
+    Pawn->SetActorLocation(GridRules::Center(Grass,GridRules::ActorOriginHeight)); Pawn->bMoving=true; Pawn->MoveTime=0;
     Pawn->TickBurning(1.f);
     TestEqual(TEXT("Extinguished fire deals no damage"),Pawn->Health,100);
     Pawn->AdvanceMovement(.3f);
@@ -67,10 +67,10 @@ bool FGridRainTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Charred grass not restored too early"),Cast<UPrimitiveComponent>(Pawn->TerrainTiles[Grass]->GetRootComponent())->IsVisible());
     Pawn->TickBurning(.11f);
     TestTrue(TEXT("Charred grass restores sixty seconds after extinguishing"),Cast<UPrimitiveComponent>(Pawn->TerrainTiles[Grass]->GetRootComponent())->IsVisible());
-    Pawn->CurrentCell=FIntPoint(3,6); Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->CurrentCell=FIntPoint(3,6); Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     TestTrue(TEXT("Wall reaches ten cells"),Pawn->CanPlaceWall(FIntPoint(13,6)));
     TestFalse(TEXT("Wall rejects eleven cells"),Pawn->CanPlaceWall(FIntPoint(14,6)));
-    AActor* Obstacle=Pawn->MakeBlock(GridRules::Center(FIntPoint(6,6),75),FVector(1,1,1.5f),FLinearColor::Gray);
+    AActor* Obstacle=Pawn->MakeBlock(GridRules::Center(FIntPoint(6,6),GridRules::ActorOriginHeight),FVector(1,1,1.5f),FLinearColor::Gray);
     const auto Plan=Pawn->PlaceableWallCells(FIntPoint(6,6));
     TestEqual(TEXT("One obstructed footprint cell leaves four pillars"),Plan.Num(),4);
     TestFalse(TEXT("Blocked cell omitted"),Plan.Contains(FIntPoint(6,6)));

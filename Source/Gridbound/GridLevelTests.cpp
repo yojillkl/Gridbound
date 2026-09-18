@@ -76,7 +76,7 @@ bool FGridLevelTest::RunTest(const FString& Parameters)
     P->Targets[0].AlertTime=8; P->Targets[0].AttackCooldown=0; P->TickCombatants(.01f);
     TestTrue(TEXT("Melee telegraphs before damage"),P->Targets[0].Windup>0);
     TestEqual(TEXT("Telegraph is not instant damage"),P->Health,100);
-    P->CurrentCell=FIntPoint(3,2); P->SetActorLocation(GridRules::Center(P->CurrentCell,75));
+    P->CurrentCell=FIntPoint(3,2); P->SetActorLocation(GridRules::Center(P->CurrentCell,GridRules::ActorOriginHeight));
     P->TickCombatants(.46f); TestEqual(TEXT("Leaving marked cell dodges slash"),P->Health,100);
     P->RespawnPlayer(FIntPoint(3,3)); P->Targets[0].ThinkTime=0; P->Targets[0].AttackCooldown=0;
     P->TickCombatants(.01f); P->TickCombatants(.46f);

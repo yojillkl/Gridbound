@@ -41,7 +41,7 @@ AGridPawn::AGridPawn()
     Body->SetRelativeScale3D(FVector(.55f,.55f,1.4f));
     Camera=CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
     Camera->SetupAttachment(RootComponent);
-    Camera->SetRelativeLocation(FVector(0,0,GridRules::EyeHeight-75.f));
+    Camera->SetRelativeLocation(FVector(0,0,GridRules::EyeHeight-GridRules::ActorOriginHeight));
     Camera->bUsePawnControlRotation=true;
     Camera->FieldOfView=90.f;
     static ConstructorHelpers::FObjectFinder<UStaticMesh> Cube(TEXT("/Engine/BasicShapes/Cube.Cube"));
@@ -150,7 +150,7 @@ void AGridPawn::ResetArena()
     for(auto& T:Targets) if(T.Actor.IsValid()) T.Actor->Destroy();
     Targets.Reset();
     CurrentCell=PlayerSpawnCell; Destination=CurrentCell;
-    SetActorLocation(GridRules::Center(CurrentCell,75));
+    SetActorLocation(GridRules::Center(CurrentCell,GridRules::ActorOriginHeight));
     bMoving=false; MoveTime=0; Cooldowns[0]=Cooldowns[1]=Cooldowns[2]=0;
     Health=GridRules::MaxHealth; SelectedSkill=INDEX_NONE; bWallAlongX=false;
     FootHeight=0.f; FallSpeed=0.f; BurnFraction=0.f; bJumping=false;
@@ -185,7 +185,7 @@ bool AGridPawn::CanEnter(FIntPoint Cell) const
 {
     if(!GridRules::Inside(Cell)) return false;
     if(bLevelMode && LevelBlocked(Cell)) return false;
-    if(SurfaceHeight(Cell)>FootHeight+20.f) return false;
+    if(SurfaceHeight(Cell)>FootHeight+GridRules::MaxStepHeight) return false;
     for(const auto& T:Targets) if(T.Health>0 && (T.Cell==Cell || (T.bWalking && T.MoveDestination==Cell))) return false;
     return true;
 }
@@ -327,14 +327,14 @@ bool AGridPawn::PlaceWall(FIntPoint CenterCell)
         CurrentCell=GridRules::Cell(GetActorLocation()); Destination=CurrentCell;
         bMoving=false; MoveTime=0; PendingMoveInput=FIntPoint::ZeroValue;
         bWaitingForMoveChord=false; MoveChordAge=0.f;
-        SetActorLocation(GridRules::Center(CurrentCell,FootHeight+75));
+        SetActorLocation(GridRules::Center(CurrentCell,FootHeight+GridRules::ActorOriginHeight));
     }
     for(auto& T:Targets) if(T.Health>0 && T.bWalking && T.Actor.IsValid()
         && (Cells.Contains(T.Cell) || Cells.Contains(T.MoveDestination)))
     {
         T.Cell=GridRules::Cell(T.Actor->GetActorLocation()); T.MoveDestination=T.Cell;
         T.bWalking=false; T.MoveProgress=0;
-        T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+75));
+        T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+GridRules::ActorOriginHeight));
     }
     for(const FIntPoint Cell:Cells)
     {

@@ -16,7 +16,7 @@ bool FGridMovementInputTest::RunTest(const FString& Parameters)
     auto Reset=[Pawn]()
     {
         Pawn->ResetArena(); Pawn->CurrentCell=FIntPoint(3,3); Pawn->Destination=Pawn->CurrentCell;
-        Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+        Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     };
     for(int32 X:{-1,1}) for(int32 Y:{-1,1}) for(bool bForwardFirst:{false,true})
     {

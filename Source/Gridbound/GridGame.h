@@ -20,12 +20,16 @@ namespace GridRules
     constexpr float BurnLifetime = 10.f;
     constexpr float BurnDamagePerSecond = 10.f;
     constexpr float EyeHeight = 130.f;
+    constexpr float ActorOriginHeight = 75.f; // The pawn's root sits 75cm above its feet
+    constexpr float GroundTolerance = 3.f;    // Feet at or below this height count as standing on the ground
     constexpr float JumpHeight = 145.f;
     constexpr float JumpApexSeconds = .41f;
     constexpr float JumpSpeed = 2.f * JumpHeight / JumpApexSeconds;
     constexpr float JumpGravity = 2.f * JumpHeight / (JumpApexSeconds * JumpApexSeconds);
     constexpr float Gravity = 980.f;
     constexpr float StepSeconds = .3f;
+    constexpr float MaxStepHeight = 20.f;     // Highest step a grounded character can make (arena)
+    constexpr float LevelStepHeight = 80.f;   // Warriors may climb taller level terrain than the player
     constexpr float MovementChordWindow = .06f;
     constexpr int32 SlashDamage = 20;
     constexpr int32 SlashDemolition = 10;

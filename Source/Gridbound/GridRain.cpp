@@ -13,7 +13,7 @@ void AGridPawn::SetTerrainVisible(FIntPoint Cell,bool bVisible)
 
 float AGridPawn::MovementSpeedMultiplier(FIntPoint Cell,float FeetHeight) const
 {
-    if(FeetHeight>3.f) return 1.f;
+    if(FeetHeight>GridRules::GroundTolerance) return 1.f;
     for(const auto& Mud:MuddyCells) if(Mud.Cell==Cell && Mud.Remaining>0.f) return .5f;
     return 1.f;
 }
@@ -114,7 +114,7 @@ void AGridPawn::SetupRainShowcase()
 {
 #if !UE_BUILD_SHIPPING
     CurrentCell=FIntPoint(2,7); Destination=CurrentCell;
-    SetActorLocation(GridRules::Center(CurrentCell,75));
+    SetActorLocation(GridRules::Center(CurrentCell,GridRules::ActorOriginHeight));
     IgniteCell(FIntPoint(4,6)); IgniteCell(FIntPoint(5,7)); IgniteCell(FIntPoint(4,8));
     CastRain(FIntPoint(5,8));
     // Keep only the demonstration's rain visible until the delayed screenshot.

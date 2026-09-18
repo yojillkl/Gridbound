@@ -80,7 +80,7 @@ void AGridPawn::AdvanceMovement(float DeltaSeconds)
     if(!CanStep(Step))
     {
         bMoving=false; MoveTime=0.f;
-        SetActorLocation(GridRules::Center(CurrentCell,FootHeight+75));
+        SetActorLocation(GridRules::Center(CurrentCell,FootHeight+GridRules::ActorOriginHeight));
         Destination=CurrentCell;
         return;
     }
@@ -88,6 +88,6 @@ void AGridPawn::AdvanceMovement(float DeltaSeconds)
     const float Duration=GridRules::StepSeconds*DistanceScale;
     MoveTime+=FMath::Max(0.f,DeltaSeconds)*MovementSpeedMultiplier(CurrentCell,FootHeight);
     const float Alpha=FMath::Clamp(MoveTime/Duration,0.f,1.f);
-    SetActorLocation(FMath::Lerp(GridRules::Center(CurrentCell,FootHeight+75),GridRules::Center(Destination,FootHeight+75),Alpha));
+    SetActorLocation(FMath::Lerp(GridRules::Center(CurrentCell,FootHeight+GridRules::ActorOriginHeight),GridRules::Center(Destination,FootHeight+GridRules::ActorOriginHeight),Alpha));
     if(Alpha>=1.f) { CurrentCell=Destination; bMoving=false; }
 }

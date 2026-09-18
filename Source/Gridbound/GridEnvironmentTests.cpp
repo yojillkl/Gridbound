@@ -17,11 +17,11 @@ bool FGridEnvironmentTest::RunTest(const FString& Parameters)
     auto* Pawn=World->SpawnActor<AGridPawn>();
     if(!TestNotNull(TEXT("Pawn"),Pawn)) { World->DestroyWorld(false); GEngine->DestroyWorldContext(World); return false; }
     Pawn->CurrentCell=FIntPoint(3,3); Pawn->Destination=Pawn->CurrentCell;
-    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     TestTrue(TEXT("Camera attaches directly to pawn"),Pawn->Camera->GetAttachParent()==Pawn->GetRootComponent());
     TestTrue(TEXT("Camera starts at eye height"),FMath::IsNearlyEqual(Pawn->Camera->GetComponentLocation().Z,130.));
     AGridPawn::FTarget Target; Target.Cell=FIntPoint(3,4);
-    Target.Actor=Pawn->MakeBlock(GridRules::Center(Target.Cell,75),FVector(.65f,.65f,1.5f),FLinearColor::Red);
+    Target.Actor=Pawn->MakeBlock(GridRules::Center(Target.Cell,GridRules::ActorOriginHeight),FVector(.65f,.65f,1.5f),FLinearColor::Red);
     Pawn->Targets.Add(Target);
     TestTrue(TEXT("Wall allowed under player and enemy"),Pawn->PlaceWall(Pawn->CurrentCell));
     Pawn->TickWalls(.175f); Pawn->UpdateElevation(.175f);
@@ -66,9 +66,9 @@ bool FGridEnvironmentTest::RunTest(const FString& Parameters)
     TestFalse(TEXT("Gravel cannot ignite"),Pawn->IgniteCell(FIntPoint(3,10)));
     TestFalse(TEXT("Outside board cannot ignite"),Pawn->IgniteCell(FIntPoint(-1,0)));
     Pawn->CurrentCell=FIntPoint(4,3); Pawn->Destination=Pawn->CurrentCell;
-    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     Pawn->Targets[0].Cell=Pawn->CurrentCell; Pawn->Targets[0].Health=100;
-    Pawn->Targets[0].Actor->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->Targets[0].Actor->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     for(int32 Frame=0;Frame<60;++Frame) Pawn->TickBurning(1.f/60.f);
     TestEqual(TEXT("60 frames burn player for exactly 10 HP"),Pawn->Health,90);
     TestEqual(TEXT("Burn also affects enemy"),Pawn->Targets[0].Health,90);
@@ -87,12 +87,12 @@ bool FGridEnvironmentTest::RunTest(const FString& Parameters)
     TestEqual(TEXT("Extinguished ground deals no damage"),Pawn->Health,80);
     Pawn->IgniteCell(Pawn->CurrentCell); Pawn->TickBurning(.5f);
     TestEqual(TEXT("Burned terrain can reignite"),Pawn->Health,75);
-    Pawn->CurrentCell=FIntPoint(5,3); Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,75));
+    Pawn->CurrentCell=FIntPoint(5,3); Pawn->SetActorLocation(GridRules::Center(Pawn->CurrentCell,GridRules::ActorOriginHeight));
     Pawn->TickBurning(1.f);
     TestEqual(TEXT("Leaving burning tile stops damage"),Pawn->Health,75);
     // Wall construction during a step must settle and lift instead of trapping the player.
     Pawn->bMoving=true; Pawn->Destination=FIntPoint(6,3);
-    Pawn->SetActorLocation(GridRules::Center(FIntPoint(6,3),75)-FVector(30,0,0));
+    Pawn->SetActorLocation(GridRules::Center(FIntPoint(6,3),GridRules::ActorOriginHeight)-FVector(30,0,0));
     TestTrue(TEXT("Wall can intersect moving destination"),Pawn->PlaceWall(FIntPoint(6,3)));
     Pawn->TickWalls(.4f); Pawn->UpdateElevation(.4f);
     TestFalse(TEXT("Intersected step safely settles"),Pawn->bMoving);

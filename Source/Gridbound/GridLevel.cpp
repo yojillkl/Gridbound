@@ -69,7 +69,7 @@ void AGridPawn::StartEncounter()
         if(SpawnWarrior(C))
         {
             auto& T=Targets.Last(); T.FootHeight=LevelHeight(C);
-            T.Actor->SetActorLocation(GridRules::Center(C,T.FootHeight+75));
+            T.Actor->SetActorLocation(GridRules::Center(C,T.FootHeight+GridRules::ActorOriginHeight));
         }
     }
 }
@@ -177,17 +177,17 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
         }
         else if(T.bWalking)
         {
-            if(LevelBlocked(T.MoveDestination) || SurfaceHeight(T.MoveDestination)>T.FootHeight+80
+            if(LevelBlocked(T.MoveDestination) || SurfaceHeight(T.MoveDestination)>T.FootHeight+GridRules::LevelStepHeight
                 || EnemyCellOccupied(T.MoveDestination,I) || T.MoveDestination==GridRules::Cell(GetActorLocation())
                 || (bMoving && T.MoveDestination==Destination))
             {
-                T.bWalking=false; T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+75));
+                T.bWalking=false; T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+GridRules::ActorOriginHeight));
             }
             else
             {
                 T.MoveProgress+=DT*MovementSpeedMultiplier(GridRules::Cell(T.Actor->GetActorLocation()),T.FootHeight);
                 const float Alpha=FMath::Clamp(T.MoveProgress/GridRules::WarriorStepSeconds,0.f,1.f);
-                T.Actor->SetActorLocation(FMath::Lerp(GridRules::Center(T.Cell,T.FootHeight+75),GridRules::Center(T.MoveDestination,T.FootHeight+75),Alpha));
+                T.Actor->SetActorLocation(FMath::Lerp(GridRules::Center(T.Cell,T.FootHeight+GridRules::ActorOriginHeight),GridRules::Center(T.MoveDestination,T.FootHeight+GridRules::ActorOriginHeight),Alpha));
                 if(Alpha>=1) { T.Cell=T.MoveDestination; T.bWalking=false; }
             }
         }
@@ -200,14 +200,14 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
             auto IsBurning=[this](FIntPoint C)
             { for(const auto& B:BurningCells) if(B.Cell==C && B.Remaining>0) return true; return false; };
             bool bEscaping=false;
-            if(T.FootHeight<3 && IsBurning(T.Cell))
+            if(T.FootHeight<GridRules::GroundTolerance && IsBurning(T.Cell))
             {
                 float Best=MAX_flt;
                 for(const FIntPoint D:{FIntPoint(1,0),FIntPoint(-1,0),FIntPoint(0,1),FIntPoint(0,-1)})
                 {
                     const FIntPoint C=T.Cell+D;
                     if(LevelBlocked(C) || IsBurning(C) || EnemyCellOccupied(C,I) || C==PlayerCell
-                        || (bMoving && C==Destination) || SurfaceHeight(C)>T.FootHeight+80) continue;
+                        || (bMoving && C==Destination) || SurfaceHeight(C)>T.FootHeight+GridRules::LevelStepHeight) continue;
                     const float Score=GridRules::Distance(C,PlayerCell)*(T.Health<=30?-1.f:1.f);
                     if(Score<Best) { Best=Score; Next=C; bEscaping=true; }
                 }
@@ -216,7 +216,7 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
             {
                 if(FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())<=GridRules::CellSize+10 && FMath::Abs(T.FootHeight-FootHeight)<=100)
                 { Next=PlayerCell; bAttack=true; }
-                else if(EnemyNextStep(I,true,Next) && SurfaceHeight(Next)>T.FootHeight+80) { bAttack=true; bWall=true; }
+                else if(EnemyNextStep(I,true,Next) && SurfaceHeight(Next)>T.FootHeight+GridRules::LevelStepHeight) { bAttack=true; bWall=true; }
             }
             else if(!bEscaping)
             {
@@ -231,7 +231,7 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
                 T.Actor->SetActorRotation(FRotator(0,(GridRules::Center(Next)-T.Actor->GetActorLocation()).Rotation().Yaw,0));
             }
             else if(!bAttack && Next!=T.Cell && Next!=PlayerCell && !(bMoving && Next==Destination)
-                && !LevelBlocked(Next) && !EnemyCellOccupied(Next,I) && SurfaceHeight(Next)<=T.FootHeight+80)
+                && !LevelBlocked(Next) && !EnemyCellOccupied(Next,I) && SurfaceHeight(Next)<=T.FootHeight+GridRules::LevelStepHeight)
             {
                 T.MoveDestination=Next; T.MoveProgress=0; T.bWalking=true;
                 T.Actor->SetActorRotation(FRotator(0,GridRules::Center(Next-T.Cell).Rotation().Yaw,0));

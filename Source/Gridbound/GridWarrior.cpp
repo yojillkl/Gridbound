@@ -10,7 +10,7 @@ bool AGridPawn::SpawnWarrior(FIntPoint Cell)
 {
     if(!GridRules::Inside(Cell)) return false;
     FTarget T; T.Cell=Cell; T.HomeCell=Cell; T.MoveDestination=Cell; T.FootHeight=SurfaceHeight(Cell);
-    T.Actor=MakeBlock(GridRules::Center(Cell,T.FootHeight+75),FVector(.65f,.65f,1.5f),FLinearColor(.9f,.12f,.07f));
+    T.Actor=MakeBlock(GridRules::Center(Cell,T.FootHeight+GridRules::ActorOriginHeight),FVector(.65f,.65f,1.5f),FLinearColor(.9f,.12f,.07f));
     if(!T.Actor.IsValid()) return false;
     Cast<UStaticMeshComponent>(T.Actor->GetRootComponent())->SetVisibility(false);
     auto* Visual=GridArt::CreateAdventurer(T.Actor.Get(),T.Actor->GetRootComponent(),TerrainMaterial?TerrainMaterial.Get():BaseMaterial.Get(),true);
@@ -55,7 +55,7 @@ void AGridPawn::RespawnPlayer(FIntPoint Cell)
     PendingMoveInput=FIntPoint::ZeroValue; bWaitingForMoveChord=false; MoveChordAge=0;
     SelectedSkill=INDEX_NONE; bHasAim=false; bValidAim=false; AimEnemy=INDEX_NONE;
     for(float& Cooldown:Cooldowns) Cooldown=0;
-    SetActorLocation(GridRules::Center(Cell,75));
+    SetActorLocation(GridRules::Center(Cell,GridRules::ActorOriginHeight));
     // Give the returning player a full attack interval to react.
     for(auto& T:Targets) T.AttackCooldown=GridRules::SlashCooldown;
     Feedback=TEXT("已重生：生命值 100｜按 Q、E、R 选择法术");
@@ -101,7 +101,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
             if(bLevelMode && LevelBlocked(To)) continue;
             if(bMoving && To==Destination && To!=Goal) continue;
             const float FromHeight=From==T.Cell?T.FootHeight:SurfaceHeight(From);
-            const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+(bLevelMode?80.f:20.f);
+            const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+(bLevelMode?GridRules::LevelStepHeight:GridRules::MaxStepHeight);
             float Cost=GridRules::WarriorStepSeconds/MovementSpeedMultiplier(To,SurfaceHeight(To));
             if(bNeedsDemolition)
             {
@@ -111,7 +111,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
                 Cost+=FMath::CeilToFloat(float(Wall->Durability)/GridRules::SlashDemolition)*(GridRules::SlashCooldown+.45f);
             }
             if(bLevelMode) for(const auto& B:BurningCells)
-                if(B.Cell==To && B.Remaining>0 && SurfaceHeight(To)<3) Cost+=T.Health<=30?30.f:8.f;
+                if(B.Cell==To && B.Remaining>0 && SurfaceHeight(To)<GridRules::GroundTolerance) Cost+=T.Health<=30?30.f:8.f;
             const float Candidate=Costs[From]+Cost;
             if(!Costs.Contains(To) || Candidate<Costs[To])
             { Costs.Add(To,Candidate); Parents.Add(To,From); Open.Add(To); }
@@ -128,11 +128,11 @@ bool AGridPawn::TryWarriorSlash(int32 Index,int32 WallIndex)
     const bool bWall=WallIndex!=INDEX_NONE;
     if(bWall && !Walls.IsValidIndex(WallIndex)) return false;
     const FVector Origin=T.Actor->GetActorLocation();
-    const FVector End=bWall?GridRules::Center(Walls[WallIndex].Cell,T.FootHeight+75):GetActorLocation();
+    const FVector End=bWall?GridRules::Center(Walls[WallIndex].Cell,T.FootHeight+GridRules::ActorOriginHeight):GetActorLocation();
     if(FVector::Dist2D(Origin,End)>GridRules::CellSize+10.f) return false;
     if(bWall)
     {
-        if(SurfaceHeight(Walls[WallIndex].Cell)<=T.FootHeight+20.f) return false;
+        if(SurfaceHeight(Walls[WallIndex].Cell)<=T.FootHeight+GridRules::MaxStepHeight) return false;
     }
     else if(FMath::Abs(T.FootHeight-FootHeight)>100.f) return false;
     FCollisionQueryParams Params; Params.AddIgnoredActor(T.Actor.Get()); Params.AddIgnoredActor(this);
@@ -177,20 +177,20 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
         T.SlashRemaining=FMath::Max(0.f,T.SlashRemaining-DT);
         if(T.bWalking)
         {
-            const bool bBlocked=SurfaceHeight(T.MoveDestination)>T.FootHeight+20.f
+            const bool bBlocked=SurfaceHeight(T.MoveDestination)>T.FootHeight+GridRules::MaxStepHeight
                 || EnemyCellOccupied(T.MoveDestination,I)
                 || T.MoveDestination==GridRules::Cell(GetActorLocation())
                 || (bMoving && T.MoveDestination==Destination);
             if(bBlocked)
             {
                 T.bWalking=false; T.MoveProgress=0;
-                T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+75));
+                T.Actor->SetActorLocation(GridRules::Center(T.Cell,T.FootHeight+GridRules::ActorOriginHeight));
             }
             else
             {
                 T.MoveProgress+=DT*MovementSpeedMultiplier(GridRules::Cell(T.Actor->GetActorLocation()),T.FootHeight);
                 const float Alpha=FMath::Clamp(T.MoveProgress/GridRules::WarriorStepSeconds,0.f,1.f);
-                T.Actor->SetActorLocation(FMath::Lerp(GridRules::Center(T.Cell,T.FootHeight+75),GridRules::Center(T.MoveDestination,T.FootHeight+75),Alpha));
+                T.Actor->SetActorLocation(FMath::Lerp(GridRules::Center(T.Cell,T.FootHeight+GridRules::ActorOriginHeight),GridRules::Center(T.MoveDestination,T.FootHeight+GridRules::ActorOriginHeight),Alpha));
                 if(Alpha>=1.f) { T.Cell=T.MoveDestination; T.bWalking=false; }
             }
         }
@@ -199,7 +199,7 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
             FIntPoint Next;
             if(EnemyNextStep(I,false,Next) || EnemyNextStep(I,true,Next))
             {
-                if(SurfaceHeight(Next)>T.FootHeight+20.f)
+                if(SurfaceHeight(Next)>T.FootHeight+GridRules::MaxStepHeight)
                 {
                     for(int32 W=0;W<Walls.Num();++W) if(Walls[W].Cell==Next) { TryWarriorSlash(I,W); break; }
                 }

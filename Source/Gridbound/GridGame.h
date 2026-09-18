@@ -147,6 +147,7 @@ private:
     float FallSpeed=0.f;
     float BurnFraction=0.f;
     FVector AimPoint = FVector::ZeroVector;
+    TArray<FIntPoint> WallPlan; // Reused between aim validation and the per-frame wall preview
     UPROPERTY() TObjectPtr<class UCameraComponent> Camera;
     UPROPERTY() TObjectPtr<class UStaticMeshComponent> Body;
     UPROPERTY() TObjectPtr<class UStaticMesh> CubeMesh;

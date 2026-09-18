@@ -242,7 +242,12 @@ void AGridPawn::UpdateAim()
     }
     bHasAim=GridRules::Inside(AimCell);
     if(!bHasAim) return;
-    bValidAim=SelectedSkill==1?CanPlaceWall(AimCell):CanCastRain(AimCell);
+    if(SelectedSkill==1)
+    {
+        WallPlan=PlaceableWallCells(AimCell);
+        bValidAim=!WallPlan.IsEmpty();
+    }
+    else bValidAim=CanCastRain(AimCell);
 }
 
 void AGridPawn::CastSkill(int32 Skill)
@@ -395,10 +400,9 @@ void AGridPawn::Tick(float DT)
     DrawCell(CurrentCell,FColor::Cyan);
     if(bHasAim && SelectedSkill==1)
     {
-        const auto Allowed=PlaceableWallCells(AimCell);
         for(const FIntPoint C:GridRules::WallCells(AimCell,bWallAlongX))
         {
-            const FColor Color=Allowed.Contains(C)?FColor::Green:FColor::Red;
+            const FColor Color=WallPlan.Contains(C)?FColor::Green:FColor::Red;
             DrawCell(C,Color);
             DrawDebugBox(GetWorld(),GridRules::Center(C,GridRules::WallHeight*.5f),
                 FVector(GridRules::CellSize*.5f,GridRules::CellSize*.5f,GridRules::WallHeight*.5f),Color,false,0.f,0,1.f);

@@ -175,6 +175,7 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
         if(T.Health<=0 || !T.Actor.IsValid()) continue;
         T.AttackCooldown=FMath::Max(0.f,T.AttackCooldown-DT);
         T.SlashRemaining=FMath::Max(0.f,T.SlashRemaining-DT);
+        T.ThinkTime=FMath::Max(0.f,T.ThinkTime-DT);
         if(T.bWalking)
         {
             const bool bBlocked=SurfaceHeight(T.MoveDestination)>T.FootHeight+GridRules::MaxStepHeight
@@ -196,17 +197,23 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
         }
         if(!T.bWalking && !TryWarriorSlash(I))
         {
-            FIntPoint Next;
-            if(EnemyNextStep(I,false,Next) || EnemyNextStep(I,true,Next))
+            // Re-plan on a think cadence; the slash attempt above stays per-tick so attacks
+            // stay responsive while pathfinding drops to a handful of runs per second.
+            if(T.ThinkTime<=0.f)
             {
-                if(SurfaceHeight(Next)>T.FootHeight+GridRules::MaxStepHeight)
+                T.ThinkTime=.2f+I*.025f;
+                FIntPoint Next;
+                if(EnemyNextStep(I,false,Next) || EnemyNextStep(I,true,Next))
                 {
-                    for(int32 W=0;W<Walls.Num();++W) if(Walls[W].Cell==Next) { TryWarriorSlash(I,W); break; }
-                }
-                else if(Next!=GridRules::Cell(GetActorLocation()) && !(bMoving && Next==Destination))
-                {
-                    T.MoveDestination=Next; T.MoveProgress=0; T.bWalking=true;
-                    T.Actor->SetActorRotation(FRotator(0,FVector(Next.X-T.Cell.X,Next.Y-T.Cell.Y,0).Rotation().Yaw,0));
+                    if(SurfaceHeight(Next)>T.FootHeight+GridRules::MaxStepHeight)
+                    {
+                        for(int32 W=0;W<Walls.Num();++W) if(Walls[W].Cell==Next) { TryWarriorSlash(I,W); break; }
+                    }
+                    else if(Next!=GridRules::Cell(GetActorLocation()) && !(bMoving && Next==Destination))
+                    {
+                        T.MoveDestination=Next; T.MoveProgress=0; T.bWalking=true;
+                        T.Actor->SetActorRotation(FRotator(0,FVector(Next.X-T.Cell.X,Next.Y-T.Cell.Y,0).Rotation().Yaw,0));
+                    }
                 }
             }
         }

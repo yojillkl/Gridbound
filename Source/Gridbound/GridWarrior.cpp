@@ -58,7 +58,7 @@ void AGridPawn::RespawnPlayer(FIntPoint Cell)
     SetActorLocation(GridRules::Center(Cell,75));
     // Give the returning player a full attack interval to react.
     for(auto& T:Targets) T.AttackCooldown=GridRules::SlashCooldown;
-    Feedback=TEXT("Respawned: 100 HP | Q / E / R to select a spell");
+    Feedback=TEXT("已重生：生命值 100｜按 Q、E、R 选择法术");
 }
 
 bool AGridPawn::EnemyCellOccupied(FIntPoint Cell,int32 Self) const
@@ -71,10 +71,10 @@ bool AGridPawn::EnemyCellOccupied(FIntPoint Cell,int32 Self) const
     return false;
 }
 
-bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next) const
+bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const FIntPoint* GoalOverride) const
 {
     const auto& T=Targets[Index];
-    const FIntPoint Goal=GridRules::Cell(GetActorLocation());
+    const FIntPoint Goal=GoalOverride?*GoalOverride:(bLevelMode?T.LastKnownPlayer:GridRules::Cell(GetActorLocation()));
     if(T.Cell==Goal) return false;
     TArray<FIntPoint> Open; Open.Add(T.Cell);
     TMap<FIntPoint,FIntPoint> Parents; Parents.Add(T.Cell,T.Cell);
@@ -101,7 +101,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next) cons
             if(bLevelMode && LevelBlocked(To)) continue;
             if(bMoving && To==Destination && To!=Goal) continue;
             const float FromHeight=From==T.Cell?T.FootHeight:SurfaceHeight(From);
-            const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+20.f;
+            const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+(bLevelMode?80.f:20.f);
             float Cost=GridRules::WarriorStepSeconds/MovementSpeedMultiplier(To,SurfaceHeight(To));
             if(bNeedsDemolition)
             {

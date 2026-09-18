@@ -102,9 +102,9 @@ void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
     for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.Get()==HitActor)
     {
         Target.Health=FMath::Max(0,Target.Health-GridRules::FireballDamage);
-        Target.AlertTime=8.f;
+        Target.AlertTime=8.f; Target.LastKnownPlayer=GridRules::Cell(GetActorLocation());
         if(Target.Health==0) HitActor->Destroy();
-        Feedback=TEXT("Fireball: 50 character damage");
+        Feedback=TEXT("火球命中：造成 50 伤害");
         return;
     }
     if(auto* Character=Cast<AGridPawn>(HitActor))
@@ -115,7 +115,7 @@ void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
     for(int32 I=0;I<Walls.Num();++I) if(Walls[I].Actor.Get()==HitActor)
     {
         DamageWall(I,GridRules::FireballDemolition);
-        Feedback=TEXT("Fireball: 50 pillar demolition");
+        Feedback=TEXT("火球命中：造成 50 土柱拆毁值");
         return;
     }
     if(HitActor->ActorHasTag(TEXT("GridTerrain")))
@@ -145,7 +145,7 @@ bool AGridPawn::IgniteCell(FIntPoint Cell)
     BurningCells.Add(Burning);
     if(const auto* Tile=TerrainTiles.Find(Cell);Tile && Tile->IsValid())
         if(auto* Mesh=Cast<UPrimitiveComponent>((*Tile)->GetRootComponent())) Mesh->SetVisibility(false);
-    Feedback=TEXT("Grass ignited: 10 damage / second for 10 seconds");
+    Feedback=TEXT("草地已点燃：每秒 10 伤害，持续 10 秒");
     return true;
 }
 
@@ -221,6 +221,6 @@ void AGridPawn::SetupCombatShowcase()
     GridArt::CreateFireball(Display,Display->GetRootComponent(),TerrainMaterial);
     Display->SetActorRotation(FRotator(-15,30,0)); Display->Tags.Add(TEXT("GridSpellDebris"));
     if(auto* PC=Cast<APlayerController>(GetController())) PC->SetControlRotation(FRotator(4,0,0));
-    SelectedSkill=0; Feedback=TEXT("Visual QA: intact, damaged and critical pillars / burning grass");
+    SelectedSkill=0; Feedback=TEXT("效果展示：完整、受损、重损土柱与燃烧草地");
 #endif
 }

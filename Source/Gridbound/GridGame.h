@@ -10,7 +10,7 @@ class UProceduralMeshComponent;
 namespace GridRules
 {
     constexpr float CellSize = 150.f;
-    constexpr int32 BoardSize = 20;
+    constexpr int32 BoardSize = 32;
     constexpr int32 MaxHealth = 100;
     constexpr int32 FireballDamage = 50;
     constexpr int32 FireballDemolition = 50;
@@ -93,7 +93,7 @@ public:
     int32 SelectedSkill = INDEX_NONE;
     bool bWallAlongX = false;
     float Cooldowns[3] = {0.f,0.f,0.f};
-    FString Feedback = TEXT("Q Fireball | E Earth Wall | R Rain | LMB cast");
+    FString Feedback = TEXT("Q 火球术｜E 土墙术｜R 降雨术｜左键施放");
     struct FTarget {
         FIntPoint Cell; int32 Health=100; TWeakObjectPtr<AActor> Actor;
         float FootHeight=0.f; float FallSpeed=0.f; float BurnFraction=0.f;
@@ -105,6 +105,7 @@ public:
         float AlertTime=0.f;
         float ThinkTime=0.f;
         float Windup=0.f;
+        FIntPoint LastKnownPlayer=FIntPoint::ZeroValue;
         FIntPoint StrikeCell=FIntPoint::ZeroValue;
         bool bStrikeWall=false;
         TWeakObjectPtr<class UStaticMeshComponent> Sword;
@@ -160,13 +161,12 @@ private:
     bool bLevelMode=false;
     int32 LevelStage=0;
     bool bLevelComplete=false;
-    bool bFireSeal=false;
-    bool bRainSeal=false;
+    FIntPoint RelicCell=FIntPoint(27,16);
+    bool bRelicCarried=false;
     float LevelSeconds=0.f;
     int32 LevelDeaths=0;
     int32 LevelCasts[3]={0,0,0};
     TArray<TWeakObjectPtr<AActor>> LevelProps;
-    TArray<TWeakObjectPtr<AActor>> LevelGates;
     TArray<TWeakObjectPtr<AActor>> LevelBeacons;
     void BuildLevel();
     void ResetLevel();
@@ -184,7 +184,7 @@ private:
     void TickCombatants(float DeltaSeconds);
     void RespawnPlayer(FIntPoint Cell);
     bool EnemyCellOccupied(FIntPoint Cell, int32 Self) const;
-    bool EnemyNextStep(int32 Index, bool bAllowWalls, FIntPoint& Next) const;
+    bool EnemyNextStep(int32 Index, bool bAllowWalls, FIntPoint& Next, const FIntPoint* GoalOverride=nullptr) const;
     bool TryWarriorSlash(int32 Index, int32 WallIndex=INDEX_NONE);
     void BuildArena();
     AActor* MakeBlock(FVector Location, FVector Scale, FLinearColor Color, bool bCollision=true);
@@ -228,6 +228,8 @@ class AGridHUD : public AHUD
     GENERATED_BODY()
 public:
     virtual void DrawHUD() override;
+private:
+    UPROPERTY() TObjectPtr<class UFont> ChineseFont;
 };
 
 UCLASS()

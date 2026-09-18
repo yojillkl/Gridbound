@@ -11,6 +11,8 @@
 #include "Engine/DirectionalLight.h"
 #include "Components/SkyAtmosphereComponent.h"
 #include "Engine/Canvas.h"
+#include "Engine/Font.h"
+#include "Misc/Paths.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
 #include "UnrealClient.h"
@@ -160,7 +162,7 @@ void AGridPawn::ResetArena()
         FIntPoint SafeCell;
         if(FindSpawnCell(Cell,false,SafeCell)) SpawnWarrior(SafeCell);
     }
-    Feedback=TEXT("Q Fireball | E Earth Wall | R Rain | LMB cast | F5 reset");
+    Feedback=TEXT("Q 火球术｜E 土墙术｜R 降雨术｜左键施放｜F5 重来");
     if(bLevelMode) ResetLevel();
 }
 
@@ -174,7 +176,7 @@ float AGridPawn::TakeDamage(float DamageAmount,const FDamageEvent& DamageEvent,A
         if(bLevelMode) ++LevelDeaths;
         RespawnRemaining=GridRules::PlayerRespawnDelay;
         bMoving=false; bWaitingForMoveChord=false; PendingMoveInput=FIntPoint::ZeroValue;
-        Feedback=TEXT("Defeated. Respawning in 2 seconds...");
+        Feedback=TEXT("你已倒下，2 秒后重生……");
     }
     return float(Applied);
 }
@@ -247,23 +249,23 @@ void AGridPawn::CastSkill(int32 Skill)
 {
     if(Skill<0 || Skill>2 || Health<=0) return;
     SelectedSkill=Skill; UpdateAim();
-    if(Cooldowns[Skill]>0) { Feedback=TEXT("Skill cooling down"); return; }
-    if(!bValidAim) { Feedback=TEXT("Invalid placement: check range, occupied cells and ground"); return; }
+    if(Cooldowns[Skill]>0) { Feedback=TEXT("技能正在冷却"); return; }
+    if(!bValidAim) { Feedback=TEXT("无法施放：请检查距离、地面和障碍物"); return; }
     if(Skill==0)
     {
         LaunchFireball((AimPoint-SpellOrigin()).GetSafeNormal());
-        Feedback=TEXT("Fireball: 50 character damage / 50 demolition");
+        Feedback=TEXT("火球：造成 50 伤害或 50 拆毁值");
     }
     else if(Skill==1)
     {
         const int32 Before=Walls.Num();
-        if(!PlaceWall(AimCell)) { Feedback=TEXT("Earth Wall placement failed"); return; }
-        Feedback=FString::Printf(TEXT("Earth Wall: %d / 5 pillars raised"),Walls.Num()-Before);
+        if(!PlaceWall(AimCell)) { Feedback=TEXT("此处无法升起土墙"); return; }
+        Feedback=FString::Printf(TEXT("土墙：已升起 %d / 5 根土柱"),Walls.Num()-Before);
     }
     else
     {
-        if(!CastRain(AimCell)) { Feedback=TEXT("Rain target is out of range or blocked"); return; }
-        Feedback=TEXT("Rain extinguishes fire / mud slows movement by 50% for 60s");
+        if(!CastRain(AimCell)) { Feedback=TEXT("降雨目标超出范围或被遮挡"); return; }
+        Feedback=TEXT("降雨可灭火；泥地使移动减速一半，持续 60 秒");
     }
     Cooldowns[Skill]=Skill==0?.6f:Skill==1?2.f:GridRules::RainCooldown;
     if(bLevelMode) ++LevelCasts[Skill];
@@ -410,60 +412,48 @@ void AGridHUD::DrawHUD()
 {
     Super::DrawHUD();
     auto* P=Cast<AGridPawn>(GetOwningPawn()); if(!P || !Canvas) return;
-    const float W=Canvas->SizeX,H=Canvas->SizeY;
-    DrawRect(FLinearColor(0.015f,0.025f,0.045f,0.85f),20,20,680,190);
-    DrawText(TEXT("GRIDBOUND v0.2.0  /  FIRST-PERSON SPELLCASTING"),FLinearColor(0.25f,0.85f,1),36,32,nullptr,1.3f);
-    DrawText(TEXT("WASD 8-way | Space jump | F5 reset | RMB rotate wall"),FLinearColor::White,36,63);
-    DrawText(TEXT("Q Fireball | E Earth Wall | R Rain | LMB cast"),FLinearColor::White,36,85);
-    DrawText(FString::Printf(TEXT("Fireball %.1fs | Wall %.1fs | Rain %.1fs | Speed %.0f%%"),P->Cooldowns[0],P->Cooldowns[1],P->Cooldowns[2],100*P->MovementSpeedMultiplier(P->CurrentCell,P->FootHeight)),FLinearColor(0.65f,0.8f,0.9f),36,110);
-    DrawText(P->Feedback,FLinearColor(1,0.8f,0.35f),36,140);
-    if(P->bLevelMode)
+    if(!ChineseFont)
     {
-        DrawRect(FLinearColor(.015f,.025f,.04f,.88f),20,H-108,850,88);
-        DrawText(P->bLevelComplete?TEXT("ELEMENTAL CROSSING  /  COMPLETE"):TEXT("ELEMENTAL CROSSING  /  F interact with beacon"),FLinearColor(.45f,1,.7f),36,H-98,nullptr,1.1f);
-        DrawText(P->LevelObjective(),FLinearColor::White,36,H-72);
-        DrawText(FString::Printf(TEXT("Time %.0fs | Deaths %d | Q %d  E %d  R %d | F5 restart"),P->LevelSeconds,P->LevelDeaths,P->LevelCasts[0],P->LevelCasts[1],P->LevelCasts[2]),FLinearColor(.7f,.85f,.9f),36,H-46);
-        const float MapX=W-194,MapY=24,Size=8;
-        DrawRect(FLinearColor(.02f,.03f,.04f,.9f),MapX-6,MapY-6,172,194);
-        for(int32 X=0;X<20;++X) for(int32 Y=0;Y<20;++Y)
-        {
-            const FIntPoint Cell(X,Y);
-            FLinearColor Color=GridArt::TerrainAt(Cell)==GridArt::ETerrain::River?FLinearColor(.1f,.35f,.6f):FLinearColor(.24f,.38f,.2f);
-            if(P->LevelBlocked(Cell)) Color=GridArt::TerrainAt(Cell)==GridArt::ETerrain::River?Color:FLinearColor(.15f,.18f,.2f);
-            if(P->SurfaceHeight(Cell)>0 && !P->LevelBlocked(Cell)) Color=FLinearColor(.52f,.4f,.2f);
-            DrawRect(Color,MapX+X*Size,MapY+Y*Size,7,7);
-        }
-        const FIntPoint Goals[]={FIntPoint(5,10),FIntPoint(12,10),FIntPoint(18,10)};
-        for(int32 I=0;I<3;++I) DrawRect(I<P->LevelStage?FLinearColor::Green:FLinearColor(1,.75f,.1f),MapX+Goals[I].X*Size,MapY+Goals[I].Y*Size,7,7);
-        for(const auto& T:P->Targets) if(T.Health>0) DrawRect(FLinearColor::Red,MapX+T.Cell.X*Size,MapY+T.Cell.Y*Size,7,7);
-        const FIntPoint Position=GridRules::Cell(P->GetActorLocation());
-        DrawRect(FLinearColor(0,1,1),MapX+Position.X*Size,MapY+Position.Y*Size,7,7);
-        DrawText(TEXT("YOU cyan | GOAL gold"),FLinearColor::White,MapX,MapY+166);
+        ChineseFont=NewObject<UFont>(this);
+        ChineseFont->FontCacheType=EFontCacheType::Runtime;
+        ChineseFont->LegacyFontSize=18;
+        ChineseFont->GetMutableInternalCompositeFont().DefaultTypeface.Fonts.Add(FTypefaceEntry(
+            FName(TEXT("Regular")),FPaths::ProjectContentDir()/TEXT("Fonts/DroidSansFallback.ttf"),EFontHinting::Default,EFontLoadingPolicy::LazyLoad));
     }
-    DrawRect(FLinearColor(.12f,.04f,.04f),36,174,200,12);
-    DrawRect(FLinearColor(.15f,.8f,.35f),36,174,200.f*P->Health/GridRules::MaxHealth,12);
-    DrawText(FString::Printf(TEXT("HP %d / %d"),P->Health,GridRules::MaxHealth),FLinearColor::White,250,170);
-    const FLinearColor C=P->bValidAim?FLinearColor::Green:FLinearColor::White;
-    DrawLine(W/2-9,H/2,W/2-3,H/2,C,2); DrawLine(W/2+3,H/2,W/2+9,H/2,C,2);
-    DrawLine(W/2,H/2-9,W/2,H/2-3,C,2); DrawLine(W/2,H/2+3,W/2,H/2+9,C,2);
-    const FString Spell=P->SelectedSkill==0?TEXT("FIREBALL / 50 DMG / 50 demolition"):
-        P->SelectedSkill==1?FString::Printf(TEXT("WALL / range 10 / %s / %d of 5 pillars"),P->bWallAlongX?TEXT("5 x 1"):TEXT("1 x 5"),P->bHasAim?P->PlaceableWallCells(P->AimCell).Num():0):
-        P->SelectedSkill==2?TEXT("RAIN / radius 4 / range 10 / mud 60s"):TEXT("Q / E / R to select a spell");
-    DrawText(Spell,C,W/2+16,H/2+16);
+    const float W=Canvas->SizeX,H=Canvas->SizeY;
+    const float S=FMath::Min(W/1280.f,H/720.f);
+    auto Text=[&](const FString& Value,float X,float Y,FLinearColor Color=FLinearColor::White)
+    { DrawText(Value,Color,X*S,Y*S,ChineseFont,S*.82f); };
+    DrawRect(FLinearColor(.015f,.025f,.035f,.72f),20*S,20*S,770*S,208*S);
+    Text(TEXT("玩法介绍"),34,28,FLinearColor(.5f,1,.8f));
+    Text(TEXT("WASD 移动　空格跳跃　Q 火球术　E 土墙术　R 降雨术"),34,56);
+    const FString Selected=P->SelectedSkill==0?TEXT("火球术"):P->SelectedSkill==1?TEXT("土墙术"):P->SelectedSkill==2?TEXT("降雨术"):TEXT("未选择");
+    Text(FString::Printf(TEXT("左键施放，右键旋转土墙，F5 重来；当前选择：%s"),*Selected),34,82);
+    Text(TEXT("火球点燃草地；降雨灭火并制造减速泥地；土墙隔敌、登高。"),34,108);
+    Text(P->bLevelMode?TEXT("河道有两处渡口：草桥可用火封路，远处砂石路可用雨减速追兵。"):
+        TEXT("泥地也会减慢自己；土墙会被破坏，施法前为自己留好退路。"),34,134);
+    Text(TEXT("绕岩石可切断敌人视线；看到橙色攻击格及时移开，可躲过劈砍。"),34,160);
+    Text(P->bLevelMode?P->LevelObjective():TEXT("自由练习技能联动，按 F5 重新开始。"),34,194,FLinearColor(1,.85f,.4f));
+    DrawRect(FLinearColor(.015f,.025f,.035f,.8f),20*S,H-68*S,280*S,48*S);
+    DrawRect(FLinearColor(.15f,.06f,.06f),34*S,H-36*S,250*S,8*S);
+    DrawRect(FLinearColor(.2f,.85f,.45f),34*S,H-36*S,250*S*P->Health/100.f,8*S);
+    DrawText(FString::Printf(TEXT("生命值　%d / 100"),P->Health),FLinearColor::White,34*S,H-63*S,ChineseFont,S*.82f);
+    // A small aiming point and spell placement geometry are interaction affordances.
+    DrawRect(P->bValidAim?FLinearColor(.5f,1,.7f):FLinearColor::White,W*.5f-2,H*.5f-2,4,4);
     for(const auto& T:P->Targets)
     {
-        if(T.Health<=0) continue;
+        if(T.Health<=0 || !T.Actor.IsValid()) continue;
+        FCollisionQueryParams Params; Params.AddIgnoredActor(P); Params.AddIgnoredActor(T.Actor.Get());
+        FHitResult Hit;
+        if(GetWorld()->LineTraceSingleByChannel(Hit,P->Camera->GetComponentLocation(),T.Actor->GetActorLocation(),ECC_Visibility,Params)) continue;
         FVector2D Screen;
-        if(T.Actor.IsValid() && PlayerOwner->ProjectWorldLocationToScreen(T.Actor->GetActorLocation()+FVector(0,0,115),Screen))
+        if(PlayerOwner->ProjectWorldLocationToScreen(T.Actor->GetActorLocation()+FVector(0,0,115),Screen))
         {
-            DrawRect(FLinearColor(0.06f,0.02f,0.02f,0.9f),Screen.X-36,Screen.Y,72,8);
-            DrawRect(FLinearColor(0.9f,0.16f,0.08f),Screen.X-36,Screen.Y,72*T.Health/100.f,8);
-            DrawText(FString::Printf(TEXT("%s %d"),T.Windup>0?TEXT("SLASH!"):T.AlertTime>0?TEXT("Warrior"):TEXT("Guard"),T.Health),T.Windup>0?FLinearColor(1,.7f,.1f):FLinearColor::White,Screen.X-35,Screen.Y-20);
+            // World health bars must never paint over the instructions or player health.
+            if(Screen.X-30*S<790*S && Screen.X+30*S>20*S && Screen.Y<228*S) continue;
+            if(Screen.X-30*S<300*S && Screen.Y+6*S>H-68*S) continue;
+            DrawRect(FLinearColor(.06f,.02f,.02f,.9f),Screen.X-30*S,Screen.Y,60*S,6*S);
+            DrawRect(FLinearColor(.9f,.16f,.08f),Screen.X-30*S,Screen.Y,60*S*T.Health/100.f,6*S);
         }
     }
-    FHitResult WallHit; FCollisionQueryParams Params; Params.AddIgnoredActor(P);
-    const FVector Eye=P->Camera->GetComponentLocation();
-    if(GetWorld()->LineTraceSingleByChannel(WallHit,Eye,Eye+P->Camera->GetForwardVector()*3000,ECC_Visibility,Params))
-        for(const auto& Wall:P->Walls) if(Wall.Actor.Get()==WallHit.GetActor())
-            DrawText(FString::Printf(TEXT("PILLAR %d / 100  |  %.0fs"),Wall.Durability,Wall.Remaining),FLinearColor(1,.78f,.4f),W/2-100,H/2+48);
 }

@@ -25,52 +25,51 @@ bool FGridLevelTest::RunTest(const FString& Parameters)
             P->ResolveFireballImpact(A,A->GetActorLocation());
         }
     };
-    TestEqual(TEXT("Camp starts with two guards"),P->Targets.Num(),2);
-    TestFalse(TEXT("Guard cannot see spawn across entire map"),P->EnemySeesPlayer(P->Targets[0]));
-    TestTrue(TEXT("First gate is locked"),P->LevelBlocked(FIntPoint(7,10)));
-    TestTrue(TEXT("River cannot be walked through"),P->LevelBlocked(FIntPoint(10,6)));
-    TestTrue(TEXT("Map boundary blocks movement"),P->LevelBlocked(FIntPoint(0,10)));
-    TestFalse(TEXT("Wall cannot cover permanent cliff"),P->PlaceableWallCells(FIntPoint(7,6)).Contains(FIntPoint(7,6)));
-    P->RespawnPlayer(FIntPoint(4,10)); P->InteractLevel();
-    TestEqual(TEXT("Living guards block capture"),P->LevelStage,0);
-    Clear(); P->TickCombatants(.1f);
-    TestEqual(TEXT("Authored encounter does not refill forever"),P->Targets.Num(),2);
-    P->InteractLevel(); TestEqual(TEXT("Unlit fire seal blocks capture"),P->LevelStage,0);
-    P->ResolveFireballImpact(P->LevelBeacons[0].Get(),FVector::ZeroVector);
-    P->InteractLevel();
-    TestEqual(TEXT("Fire seal advances to crossing"),P->LevelStage,1);
-    TestEqual(TEXT("Checkpoint moves to river bank"),P->PlayerSpawnCell,FIntPoint(8,10));
-    TestFalse(TEXT("Camp gate opens"),P->LevelBlocked(FIntPoint(7,10)));
-    TestTrue(TEXT("Summit gate stays locked"),P->LevelBlocked(FIntPoint(13,10)));
-    TestEqual(TEXT("Crossing has three guards"),P->Targets.Num(),3);
-    P->TickLevel(.1f);
-    TestEqual(TEXT("Crossing starts with nine burning grass cells"),P->BurningCells.Num(),9);
-    TestTrue(TEXT("Rain can cool crossing from checkpoint"),P->CastRain(FIntPoint(11,10)));
-    TestTrue(TEXT("Rain seal registers coverage"),P->bRainSeal);
-    for(const auto& B:P->BurningCells) TestTrue(TEXT("Rain extinguishes crossing"),B.Remaining<=0);
-    TestEqual(TEXT("Extinguished crossing slows grounded characters"),P->MovementSpeedMultiplier(FIntPoint(10,10),0),.5f);
-    Clear(); P->RespawnPlayer(FIntPoint(12,9)); P->InteractLevel();
-    TestEqual(TEXT("Rain seal advances to summit"),P->LevelStage,2);
-    TestFalse(TEXT("Final gate opens"),P->LevelBlocked(FIntPoint(13,10)));
-    TestEqual(TEXT("Final encounter has four guards"),P->Targets.Num(),4);
-    Clear(); P->RespawnPlayer(FIntPoint(16,10));
-    TestFalse(TEXT("Cannot walk directly up two-cell platform"),P->CanEnter(FIntPoint(17,10)));
-    TestTrue(TEXT("Earth wall can raise player beside platform"),P->PlaceWall(FIntPoint(16,10)));
+    TestEqual(TEXT("Single map has ten persistent guards"),P->Targets.Num(),10);
+    TestFalse(TEXT("Spawn is outside initial sight"),P->EnemySeesPlayer(P->Targets[0]));
+    TestFalse(TEXT("Old camp gate removed"),P->LevelBlocked(FIntPoint(7,10)));
+    TestFalse(TEXT("Old summit gate removed"),P->LevelBlocked(FIntPoint(13,10)));
+    TestTrue(TEXT("River still blocks walking"),P->LevelBlocked(FIntPoint(10,6)));
+    TestFalse(TEXT("Second crossing is open"),P->LevelBlocked(FIntPoint(11,21)));
+    TestTrue(TEXT("Boundary blocks movement"),P->LevelBlocked(FIntPoint(31,10)));
+    // Flood fill permits jumpable rises and proves both crossings independently reach the relic.
+    for(int32 ClosedCrossing:{10,21})
+    {
+        TSet<FIntPoint> Visited; TArray<FIntPoint> Queue; Queue.Add(P->PlayerSpawnCell); Visited.Add(Queue[0]);
+        for(int32 Q=0;Q<Queue.Num();++Q) for(const FIntPoint D:{FIntPoint(1,0),FIntPoint(-1,0),FIntPoint(0,1),FIntPoint(0,-1)})
+        {
+            const FIntPoint C=Queue[Q]+D;
+            if(Visited.Contains(C) || P->LevelBlocked(C) || (C.X>=9 && C.X<=12 && FMath::Abs(C.Y-ClosedCrossing)<=1)) continue;
+            if(P->LevelHeight(C)>P->LevelHeight(Queue[Q])+GridRules::JumpHeight) continue;
+            Queue.Add(C); Visited.Add(C);
+        }
+        TestTrue(TEXT("Independent crossing reaches relic staircase"),Visited.Contains(FIntPoint(26,16)));
+    }
+    P->RespawnPlayer(FIntPoint(26,16)); P->UpdateElevation(.1f); P->InteractLevel();
+    TestTrue(TEXT("Can take relic without killing guards"),P->bRelicCarried);
+    TestFalse(TEXT("Pickup alone does not win"),P->bLevelComplete);
+    TestTrue(TEXT("Nearby guards hear relic alarm"),P->Targets.Last().AlertTime>0);
+    TestEqual(TEXT("Distant guards are not omniscient"),P->Targets[0].AlertTime,0.f);
+    P->TakeDamage(100,FDamageEvent(),nullptr,nullptr); P->TickLevel(.1f);
+    TestFalse(TEXT("Death drops carried relic"),P->bRelicCarried);
+    TestEqual(TEXT("Relic remains at death location"),P->RelicCell,FIntPoint(26,16));
+    P->TickCombatants(2.1f);
+    TestEqual(TEXT("Death returns to camp"),P->CurrentCell,P->PlayerSpawnCell);
+    P->RespawnPlayer(FIntPoint(25,16)); P->UpdateElevation(.1f); P->InteractLevel();
+    TestTrue(TEXT("Dropped relic can be recovered"),P->bRelicCarried);
+    P->RespawnPlayer(P->PlayerSpawnCell); P->InteractLevel();
+    TestTrue(TEXT("Returning relic wins with guards alive"),P->bLevelComplete);
+    P->ResetArena(); Clear(); P->Targets.Reset(); P->RespawnPlayer(FIntPoint(25,14));
+    TestFalse(TEXT("Cannot walk straight onto high ruin"),P->CanEnter(FIntPoint(26,14)));
+    TestTrue(TEXT("Wall provides alternate ascent"),P->PlaceWall(FIntPoint(25,14)));
     P->TickWalls(.4f); P->UpdateElevation(.4f);
-    TestTrue(TEXT("Wall reaches 450 cm"),FMath::IsNearlyEqual(P->FootHeight,450.f));
-    TestTrue(TEXT("Raised player can step onto summit"),P->TryStartMove(FIntPoint(1,0),0));
+    TestTrue(TEXT("Wall lifts player above ruin"),FMath::IsNearlyEqual(P->FootHeight,450.f));
+    TestTrue(TEXT("Can step from wall onto ruin"),P->TryStartMove(FIntPoint(1,0),0));
     P->AdvanceMovement(.31f); P->UpdateElevation(1.f);
-    TestTrue(TEXT("Player lands on permanent 300 cm platform"),FMath::IsNearlyEqual(P->FootHeight,300.f));
-    P->InteractLevel(); TestTrue(TEXT("All three encounters can be completed"),P->bLevelComplete);
-    const float CompleteTime=P->LevelSeconds; P->TickLevel(1.f);
-    TestEqual(TEXT("Completion timer freezes"),P->LevelSeconds,CompleteTime);
-    P->TakeDamage(100,FDamageEvent(),nullptr,nullptr);
-    TestEqual(TEXT("Completion protects player from leftover effects"),P->Health,100);
+    TestTrue(TEXT("Land on ruin at 300 cm"),FMath::IsNearlyEqual(P->FootHeight,300.f));
     P->ResetArena();
-    TestFalse(TEXT("Restart clears completion"),P->bLevelComplete);
-    TestEqual(TEXT("Restart resets stage"),P->LevelStage,0);
-    TestEqual(TEXT("Restart clears old walls"),P->Walls.Num(),0);
-    TestEqual(TEXT("Restart removes mud"),P->MuddyCells.Num(),0);
+    TestFalse(TEXT("Restart clears relic and completion"),P->bRelicCarried || P->bLevelComplete);
+    TestEqual(TEXT("Restart clears walls"),P->Walls.Num(),0);
 
     // Windup commits to a cell, so moving out before impact is a real dodge.
     Clear(); P->Targets.Reset(); P->RespawnPlayer(FIntPoint(3,3)); P->SpawnWarrior(FIntPoint(4,3));

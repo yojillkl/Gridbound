@@ -72,7 +72,6 @@ void AGridPawn::MakeMud(FIntPoint Cell)
 bool AGridPawn::CastRain(FIntPoint CenterCell)
 {
     if(!CanCastRain(CenterCell)) return false;
-    if(bLevelMode && LevelStage==1 && GridRules::RainCells(CenterCell).Contains(FIntPoint(12,10))) bRainSeal=true;
     for(const FIntPoint Cell:GridRules::RainCells(CenterCell))
     {
         if(!GridRules::Inside(Cell)) continue;
@@ -121,6 +120,6 @@ void AGridPawn::SetupRainShowcase()
     // Keep only the demonstration's rain visible until the delayed screenshot.
     if(RainEffects.Num()) RainEffects[0].Age=-5.f;
     if(auto* PC=Cast<APlayerController>(GetController())) PC->SetControlRotation(FRotator(-6,12,0));
-    SelectedSkill=2; Feedback=TEXT("Rain / extinguished grass and gravel become mud / speed -50%");
+    SelectedSkill=2; Feedback=TEXT("降雨：熄灭草地火焰，砂石与焦土变为泥地，移动减速一半");
 #endif
 }

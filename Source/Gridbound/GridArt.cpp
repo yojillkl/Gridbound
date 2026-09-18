@@ -141,6 +141,8 @@ void GridArt::AnimateRain(AActor* Actor,float Age)
 GridArt::ETerrain GridArt::TerrainAt(FIntPoint Cell)
 {
     if(Cell.Y>=9 && Cell.Y<=11 && Cell.X>=9 && Cell.X<=11) return ETerrain::Grass;
+    if(Cell.Y>=20 && Cell.Y<=22) return ETerrain::Gravel;
+    if(Cell.X>=22 && Cell.X<=29 && Cell.Y>=14 && Cell.Y<=18) return ETerrain::Gravel;
     const int32 RiverCenter=10+(Cell.Y<5?-1:Cell.Y<13?0:1);
     if(Cell.X==RiverCenter || Cell.X==RiverCenter+1) return ETerrain::River;
     if(Cell.X==RiverCenter-1 || Cell.X==RiverCenter+2 || (Cell.Y>=9 && Cell.Y<=11)) return ETerrain::Gravel;
@@ -149,14 +151,17 @@ GridArt::ETerrain GridArt::TerrainAt(FIntPoint Cell)
 
 bool GridArt::CliffAt(FIntPoint C)
 {
-    if(C.X==0 || C.Y==0 || C.X==19 || C.Y==19) return true;
-    if((C.X==7 || C.X==13) && (C.Y<9 || C.Y>11)) return true;
-    return (C.X==4 && (C.Y==5 || C.Y==15)) || (C.X==16 && (C.Y==7 || C.Y==13));
+    if(C.X==0 || C.Y==0 || C.X==GridRules::BoardSize-1 || C.Y==GridRules::BoardSize-1) return true;
+    // Broken ridge: three passages connect both sides, with room to circle cover.
+    if(C.X==20 && ((C.Y>=5 && C.Y<=10) || (C.Y>=18 && C.Y<=21) || (C.Y>=25 && C.Y<=27))) return true;
+    return (C.X==6 && (C.Y==7 || C.Y==14 || C.Y==23))
+        || (C.X==16 && (C.Y==8 || C.Y==16 || C.Y==25))
+        || (C.X==24 && (C.Y==11 || C.Y==22));
 }
 
 bool GridArt::PlatformAt(FIntPoint C)
 {
-    return C.X>=17 && C.X<=18 && C.Y>=9 && C.Y<=11;
+    return C.X>=26 && C.X<=29 && C.Y>=14 && C.Y<=18;
 }
 
 UProceduralMeshComponent* GridArt::CreateStone(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,float Height)

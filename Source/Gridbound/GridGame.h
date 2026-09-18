@@ -1,4 +1,6 @@
 #pragma once
+// Gridbound：第一人称网格战斗原型。AGridPawn 负责玩家、敌人状态机、网格规则与战斗模拟；
+// 移动、战斗、关卡、环境与程序化美术拆分到同名的多个 .cpp 文件里。
 #include "CoreMinimal.h"
 #include "GameFramework/Pawn.h"
 #include "GameFramework/GameModeBase.h"
@@ -9,61 +11,69 @@ class UProceduralMeshComponent;
 
 namespace GridRules
 {
-    constexpr float CellSize = 150.f;
-    constexpr int32 BoardSize = 32;
-    constexpr int32 MaxHealth = 100;
-    constexpr int32 FireballDamage = 50;
-    constexpr int32 FireballDemolition = 50;
-    constexpr int32 WallDurability = 100;
-    constexpr float WallLifetime = 60.f;
-    constexpr float WallRiseTime = .35f;
-    constexpr float BurnLifetime = 10.f;
-    constexpr float BurnDamagePerSecond = 10.f;
+    constexpr float CellSize = 150.f;          // 单格边长（厘米），所有位置与距离都以它为单位
+    constexpr int32 BoardSize = 32;            // 棋盘为 32×32 格
+    constexpr int32 MaxHealth = 100;           // 玩家与敌人的生命上限
+    constexpr int32 FireballDamage = 50;       // 火球命中角色造成的伤害
+    constexpr int32 FireballDemolition = 50;   // 火球命中土柱造成的拆毁值
+    constexpr int32 WallDurability = 100;      // 单根土柱的耐久
+    constexpr float WallLifetime = 60.f;       // 土柱存在的秒数
+    constexpr float WallRiseTime = .35f;       // 土柱从地面升起到顶的时间
+    constexpr float BurnLifetime = 10.f;       // 草地燃烧时长
+    constexpr float BurnDamagePerSecond = 10.f; // 站在火上的每秒伤害
     constexpr float EyeHeight = 130.f;
-    constexpr float ActorOriginHeight = 75.f; // The pawn's root sits 75cm above its feet
-    constexpr float GroundTolerance = 3.f;    // Feet at or below this height count as standing on the ground
-    constexpr float JumpHeight = 145.f;
-    constexpr float JumpApexSeconds = .41f;
+    constexpr float ActorOriginHeight = 75.f; // 角色的根节点位于脚底上方 75 厘米
+    constexpr float GroundTolerance = 3.f;    // 脚底低于此高度即视为站在地面上
+    constexpr float JumpHeight = 320.f; // 跳跃顶点；能越过 300 厘米的遗迹柱顶，从而直接跳上石柱
+    constexpr float JumpApexSeconds = .41f;   // 到达顶点的时间，跳跃速度与重力由它推导
     constexpr float JumpSpeed = 2.f * JumpHeight / JumpApexSeconds;
     constexpr float JumpGravity = 2.f * JumpHeight / (JumpApexSeconds * JumpApexSeconds);
     constexpr float Gravity = 980.f;
     constexpr float StepSeconds = .3f;
-    constexpr float MaxStepHeight = 20.f;     // Highest step a grounded character can make (arena)
-    constexpr float LevelStepHeight = 80.f;   // Warriors may climb taller level terrain than the player
-    constexpr float MovementChordWindow = .06f;
-    constexpr int32 SlashDamage = 20;
-    constexpr int32 SlashDemolition = 10;
-    constexpr float SlashCooldown = 1.f;
-    constexpr float WarriorStepSeconds = .45f;
-    constexpr float PlayerRespawnDelay = 2.f;
+    constexpr float MaxStepHeight = 20.f;     // 贴地角色可直接跨上的最大高差（竞技场）
+    constexpr float LevelStepHeight = 80.f;   // 敌人在关卡中可攀爬比玩家更高的地形
+    constexpr float MovementChordWindow = .06f; // 两个方向键被判定为同一次斜向输入的时间窗
+    constexpr int32 SlashDamage = 20;         // 一次劈砍对玩家造成的伤害
+    constexpr int32 SlashDemolition = 10;     // 一次劈砍对土柱造成的拆毁值
+    constexpr float SlashCooldown = 1.f;      // 两次劈砍之间的冷却
+    constexpr float MeleeReachExtra = 10.f;   // 劈砍超过一格的水平余量
+    constexpr float MeleeReachHeight = 100.f; // 劈砍的垂直容差
+    constexpr float MeleeWindup = .45f;       // 劈砍命中前的预警时间
+    constexpr float WarriorStepSeconds = .45f; // 敌人走一格的时间
+    constexpr float PlayerRespawnDelay = 2.f;  // 玩家死亡后等待重生的秒数
     inline FIntPoint MovementInput(bool Forward, bool Back, bool Left, bool Right)
     { return FIntPoint(int32(Forward)-int32(Back),int32(Right)-int32(Left)); }
     inline FIntPoint MoveDirection(float Yaw, FIntPoint Input)
     {
+        // 把「前后左右」输入按镜头朝向旋转，并量化到最近的八方向之一。
         if(Input==FIntPoint::ZeroValue) return FIntPoint::ZeroValue;
         const FVector Desired=FRotator(0,Yaw,0).RotateVector(FVector(Input.X,Input.Y,0));
         const float Angle=FMath::RoundToInt(FMath::Atan2(Desired.Y,Desired.X)/(PI/4.f))*(PI/4.f);
         return FIntPoint(FMath::RoundToInt(FMath::Cos(Angle)),FMath::RoundToInt(FMath::Sin(Angle)));
     }
-    constexpr float FireballRange = 6.f * CellSize;
-    constexpr float FireballSpeed = 1800.f;
-    constexpr float FireballRadius = 18.f;
-    constexpr int32 WallRange = 10;
-    constexpr int32 RainRadius = 4;
-    constexpr int32 RainRange = 10;
-    constexpr float RainCooldown = 4.f;
-    constexpr float RainVisualLifetime = 3.f;
-    constexpr float TerrainRecovery = 60.f;
+    constexpr float FireballRange = 9.f * CellSize; // 火球飞行上限；比 10 格的索敌半径少一格
+    constexpr float FireballSpeed = 1800.f;         // 火球飞行速度
+    constexpr float FireballRadius = 18.f;          // 火球碰撞半径
+    constexpr int32 WallRange = 10;   // 土墙中心距离玩家的最大格数
+    constexpr int32 RainRadius = 4;   // 降雨覆盖半径（格）
+    constexpr int32 RainRange = 10;   // 降雨施法距离（格）
+    constexpr float FireballCooldown = 3.f; // 火球是常驻输出，冷却短但也不能乱放
+    constexpr float WallCooldown = 10.f;    // 土墙改变地形，放置它需要权衡
+    constexpr float RainCooldown = 10.f;    // 降雨灭火并减速一大片，属于一次性决策
+    constexpr float RainVisualLifetime = 3.f; // 降雨动画的持续时间
+    constexpr float TerrainRecovery = 60.f;   // 焦土/泥地恢复原貌的时间
     inline TArray<FIntPoint> RainCells(FIntPoint CenterCell)
     {
+        // 以中心格为圆心的覆盖范围：曼哈顿距离会变成菱形，这里改用欧氏距离。
         TArray<FIntPoint> Cells;
         for(int32 X=-RainRadius;X<=RainRadius;++X) for(int32 Y=-RainRadius;Y<=RainRadius;++Y)
             if(X*X+Y*Y<=RainRadius*RainRadius) Cells.Add(CenterCell+FIntPoint(X,Y));
         return Cells;
     }
-    constexpr float WallHeight = 3.f * CellSize;
+    constexpr float WallHeight = 3.f * CellSize; // 土柱总高度
     inline TArray<FIntPoint> WallCells(FIntPoint CenterCell, bool bAlongX)
     {
+        // 一面土墙是横跨 5 格的直线，bAlongX 决定沿 X 还是 Y 轴展开。
         TArray<FIntPoint> Cells;
         for(int32 Offset=-2;Offset<=2;++Offset)
             Cells.Add(CenterCell+(bAlongX?FIntPoint(Offset,0):FIntPoint(0,Offset)));
@@ -93,25 +103,31 @@ public:
     bool bHasAim = false;
     bool bValidAim = false;
     int32 AimEnemy = INDEX_NONE;
-    // No spell is armed until Q, E or R is pressed.
+    // 按 Q、E、R 之前没有任何法术被选中。
     int32 SelectedSkill = INDEX_NONE;
     bool bWallAlongX = false;
     float Cooldowns[3] = {0.f,0.f,0.f};
     FString Feedback = TEXT("Q 火球术｜E 土墙术｜R 降雨术｜左键施放");
+    // 单个敌人；AI 是在 TickCombatants 里驱动的小型状态机。
     struct FTarget {
-        FIntPoint Cell; int32 Health=100; TWeakObjectPtr<AActor> Actor;
-        float FootHeight=0.f; float FallSpeed=0.f; float BurnFraction=0.f;
+        FIntPoint Cell;                              // 当前占据的逻辑格
+        int32 Health=100;                            // 自己的生命，与玩家独立
+        TWeakObjectPtr<AActor> Actor;                // 视觉代理（冒险者 + 剑）
+        float FootHeight=0.f;                        // 脚底相对格面地表的高度
+        float FallSpeed=0.f;                         // 悬空时的垂直速度
+        float BurnFraction=0.f;                      // 本帧累积的小数火焰伤害
         FIntPoint MoveDestination=FIntPoint::ZeroValue;
-        float MoveProgress=0.f; bool bWalking=false;
+        float MoveProgress=0.f;                      // 当前步进 0..1
+        bool bWalking=false;                         // 正在从 Cell 走向 MoveDestination
         float AttackCooldown=GridRules::SlashCooldown;
-        float SlashRemaining=0.f;
-        FIntPoint HomeCell=FIntPoint::ZeroValue;
-        float AlertTime=0.f;
-        float ThinkTime=0.f;
-        float Windup=0.f;
+        float SlashRemaining=0.f;                    // 挥剑动画计时
+        FIntPoint HomeCell=FIntPoint::ZeroValue;     // 关卡模式下的巡逻锚点
+        float AlertTime=0.f;                         // 追击已知玩家位置剩余的秒数
+        float ThinkTime=0.f;                         // 让寻路不必每帧都跑一次
+        float Windup=0.f;                            // 劈砍命中前的预警计时
         FIntPoint LastKnownPlayer=FIntPoint::ZeroValue;
-        FIntPoint StrikeCell=FIntPoint::ZeroValue;
-        bool bStrikeWall=false;
+        FIntPoint StrikeCell=FIntPoint::ZeroValue;   // 本次劈砍将要命中的格
+        bool bStrikeWall=false;                      // 为真表示本次劈砍目标是土柱
         TWeakObjectPtr<class UStaticMeshComponent> Sword;
     };
     TArray<FTarget> Targets;
@@ -124,30 +140,29 @@ public:
     float MouseSensitivity = 0.26f;
     float MovementSpeedMultiplier(FIntPoint Cell, float FeetHeight) const;
 private:
-    friend class FGridCombatTest;
-    friend class FGridEnvironmentTest;
-    friend class FGridRainTest;
-    friend class FGridMovementTest;
-    friend class FGridMovementInputTest;
-    friend class FGridWarriorTest;
-    friend class FGridLevelTest;
     friend class AGridHUD;
-    struct FFireball { TWeakObjectPtr<AActor> Actor; FVector Direction; float Remaining=GridRules::FireballRange; };
-    struct FWall { FIntPoint Cell; TWeakObjectPtr<AActor> Actor; int32 Durability=GridRules::WallDurability; float Remaining=GridRules::WallLifetime; float Age=0.f; TWeakObjectPtr<UProceduralMeshComponent> Visual; };
-    struct FBurningCell { FIntPoint Cell; float Remaining=GridRules::BurnLifetime; float Age=0.f; TWeakObjectPtr<AActor> Actor; float RecoveryRemaining=GridRules::TerrainRecovery; };
-    struct FMuddyCell { FIntPoint Cell; float Remaining=GridRules::TerrainRecovery; TWeakObjectPtr<AActor> Actor; };
-    struct FRainEffect { TWeakObjectPtr<AActor> Actor; float Age=0.f; };
+    struct FFireball { TWeakObjectPtr<AActor> Actor; FVector Direction; float Remaining=GridRules::FireballRange; }; // Remaining：剩余飞行距离
+    struct FWall { FIntPoint Cell; TWeakObjectPtr<AActor> Actor; int32 Durability=GridRules::WallDurability; float Remaining=GridRules::WallLifetime; float Age=0.f; TWeakObjectPtr<UProceduralMeshComponent> Visual; }; // 玩家召唤的土柱
+    struct FBurningCell { FIntPoint Cell; float Remaining=GridRules::BurnLifetime; float Age=0.f; TWeakObjectPtr<AActor> Actor; float RecoveryRemaining=GridRules::TerrainRecovery; }; // 燃烧中的草地
+    struct FMuddyCell { FIntPoint Cell; float Remaining=GridRules::TerrainRecovery; TWeakObjectPtr<AActor> Actor; }; // 降雨制造的泥地
+    struct FRainEffect { TWeakObjectPtr<AActor> Actor; float Age=0.f; }; // 降雨的纯视觉表现
+    // Dijkstra 的临时缓冲，跨 EnemyNextStep 调用复用，避免每帧分配内存。
+    struct FPathScratch { TArray<FIntPoint> Open; TMap<FIntPoint,FIntPoint> Parents; TMap<FIntPoint,float> Costs; TSet<FIntPoint> Closed; };
+    mutable FPathScratch PathScratch;
     TArray<FFireball> Fireballs;
     TArray<FWall> Walls;
     TArray<FBurningCell> BurningCells;
     TArray<FMuddyCell> MuddyCells;
     TArray<FRainEffect> RainEffects;
     TMap<FIntPoint,TWeakObjectPtr<AActor>> TerrainTiles;
-    float FootHeight=0.f;
-    float FallSpeed=0.f;
-    float BurnFraction=0.f;
-    FVector AimPoint = FVector::ZeroVector;
-    TArray<FIntPoint> WallPlan; // Reused between aim validation and the per-frame wall preview
+    float FootHeight=0.f;       // 玩家脚底相对格面地表的高度
+    float FallSpeed=0.f;        // 玩家悬空时的垂直速度
+    float BurnFraction=0.f;     // 本帧累积的小数火焰伤害
+    float DamageFlash=0.f;      // 0..1，受伤时的红色全屏反馈，在 Tick 里衰减
+    float BurnOverlay=0.f;      // 0..1，站在燃烧地面上的橙色全屏反馈
+    FVector AimPoint = FVector::ZeroVector; // 屏幕中心射线命中的瞄准点
+    TArray<FIntPoint> WallPlan; // 在瞄准校验与每帧土墙预览之间复用的格子列表
+    TMap<FIntPoint,int32> OccupiedBy; // 格 -> 敌人索引，每个战斗帧重建，用于 O(1) 的占位查询
     UPROPERTY() TObjectPtr<class UCameraComponent> Camera;
     UPROPERTY() TObjectPtr<class UStaticMeshComponent> Body;
     UPROPERTY() TObjectPtr<class UStaticMesh> CubeMesh;
@@ -155,24 +170,24 @@ private:
     UPROPERTY() TObjectPtr<class UMaterialInterface> BaseMaterial;
     UPROPERTY() TObjectPtr<class UMaterialInterface> TerrainMaterial;
     UPROPERTY() TObjectPtr<class UProceduralMeshComponent> Adventurer;
-    FIntPoint Destination;
-    float MoveTime = 0.f;
-    bool bMoving = false;
-    bool bJumping = false;
-    FIntPoint PendingMoveInput = FIntPoint::ZeroValue;
-    bool bWaitingForMoveChord = false;
-    float MoveChordAge = 0.f;
-    float RespawnRemaining = 0.f;
-    bool bLevelMode=false;
-    int32 LevelStage=0;
-    bool bLevelComplete=false;
-    FIntPoint RelicCell=FIntPoint(27,16);
-    bool bRelicCarried=false;
-    float LevelSeconds=0.f;
-    int32 LevelDeaths=0;
-    int32 LevelCasts[3]={0,0,0};
-    TArray<TWeakObjectPtr<AActor>> LevelProps;
-    TArray<TWeakObjectPtr<AActor>> LevelBeacons;
+    FIntPoint Destination;      // 当前步进的目标格
+    float MoveTime = 0.f;       // 当前步进已消耗的时间
+    bool bMoving = false;       // 正在从 CurrentCell 走向 Destination
+    bool bJumping = false;      // 处于空中；水平移动仍可用
+    FIntPoint PendingMoveInput = FIntPoint::ZeroValue; // 缓存等待判定的方向输入
+    bool bWaitingForMoveChord = false; // 正在缓冲两个方向键以合并成一次斜向输入
+    float MoveChordAge = 0.f;   // 方向键合并缓冲已等待的时间
+    float RespawnRemaining = 0.f; // 距离重生的剩余秒数
+    bool bLevelMode=false;      // 关卡模式；否则为自由练习的竞技场
+    int32 LevelStage=0;         // 关卡阶段：0 拿晶核前，1 拿到后
+    bool bLevelComplete=false;  // 晶核已带回营地，通关
+    FIntPoint RelicCell=FIntPoint(27,16); // 晶核所在的格（死亡掉落时会更新）
+    bool bRelicCarried=false;   // 玩家当前是否携带晶核
+    float LevelSeconds=0.f;     // 本关已用时间（用于巡逻相位与结算）
+    int32 LevelDeaths=0;        // 本关死亡次数
+    int32 LevelCasts[3]={0,0,0}; // 本关三种法术各施放次数
+    TArray<TWeakObjectPtr<AActor>> LevelProps;   // 关卡生成的静态地形与装饰
+    TArray<TWeakObjectPtr<AActor>> LevelBeacons; // 晶核与营地的光柱标记
     void BuildLevel();
     void ResetLevel();
     void StartEncounter();
@@ -188,6 +203,7 @@ private:
     bool FindSpawnCell(FIntPoint Preferred, bool bForPlayer, FIntPoint& Result) const;
     void TickCombatants(float DeltaSeconds);
     void RespawnPlayer(FIntPoint Cell);
+    void RebuildOccupancy();
     bool EnemyCellOccupied(FIntPoint Cell, int32 Self) const;
     bool EnemyNextStep(int32 Index, bool bAllowWalls, FIntPoint& Next, const FIntPoint* GoalOverride=nullptr) const;
     bool TryWarriorSlash(int32 Index, int32 WallIndex=INDEX_NONE);

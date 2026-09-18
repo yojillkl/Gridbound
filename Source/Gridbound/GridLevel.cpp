@@ -6,8 +6,11 @@
 #include "Engine/World.h"
 #include "DrawDebugHelpers.h"
 
+// 关卡模式：地形阻挡、遗迹高度、场景搭建、目标提示、索敌与敌人的巡逻/追击状态机。
+
 bool AGridPawn::LevelBlocked(FIntPoint C) const
 {
+    // 关卡中的实心阻挡：边界、悬崖、河面，以及「未拾取状态」下被晶核占住的格。
     return !GridRules::Inside(C) || GridArt::CliffAt(C)
         || GridArt::TerrainAt(C)==GridArt::ETerrain::River
         || (!bRelicCarried && C==RelicCell);
@@ -16,13 +19,14 @@ bool AGridPawn::LevelBlocked(FIntPoint C) const
 float AGridPawn::LevelHeight(FIntPoint C) const
 {
     if(GridArt::PlatformAt(C)) return 300.f;
-    // Five 60 cm steps: jumping is an alternative to raising an earth wall.
+    // 五级 60 厘米的台阶：跳跃或搭土墙都能登上，给玩家多一条路线。
     if(C.Y>=15 && C.Y<=17 && C.X>=22 && C.X<=25) return (C.X-21)*60.f;
     return 0.f;
 }
 
 void AGridPawn::BuildLevel()
 {
+    // 搭建整张关卡：清掉旧物件，逐格生成石柱/悬崖，再立起晶核与营地的光柱。
     for(auto& A:LevelProps) if(A.IsValid()) A->Destroy();
     LevelProps.Reset(); LevelBeacons.Reset();
     for(int32 X=0;X<GridRules::BoardSize;++X) for(int32 Y=0;Y<GridRules::BoardSize;++Y)
@@ -39,7 +43,7 @@ void AGridPawn::BuildLevel()
     for(const FIntPoint C:{RelicCell,PlayerSpawnCell})
     {
         const bool bRelic=C==RelicCell;
-        // Keep the camp marker behind the arrival point, clear of the first-person camera.
+        // 营地光柱放在到达点身后一格，避免挡住第一人称镜头。
         const FIntPoint MarkerCell=bRelic?C:C+FIntPoint(-1,0);
         AActor* A=MakeBlock(GridRules::Center(MarkerCell,LevelHeight(C)+60),FVector(.5f,.5f,1.6f),FLinearColor(1,.7f,.1f),bRelic);
         Cast<UStaticMeshComponent>(A->GetRootComponent())->SetVisibility(false);
@@ -52,6 +56,7 @@ void AGridPawn::BuildLevel()
 
 void AGridPawn::ResetLevel()
 {
+    // 重置一局：清空进度与计数，把玩家放回营地并重新生成地形和守卫。
     LevelStage=0; bLevelComplete=false; bRelicCarried=false; RelicCell=FIntPoint(27,16);
     LevelSeconds=0; LevelDeaths=0; for(int32& Count:LevelCasts) Count=0;
     PlayerSpawnCell=FIntPoint(2,10); RespawnPlayer(PlayerSpawnCell);
@@ -61,6 +66,7 @@ void AGridPawn::ResetLevel()
 
 void AGridPawn::StartEncounter()
 {
+    // 清掉旧守卫，在固定的巡逻点各生成一名敌人，并落到对应的地表高度上。
     for(auto& T:Targets) if(T.Actor.IsValid()) T.Actor->Destroy();
     Targets.Reset();
     for(const FIntPoint C:{FIntPoint(7,8),FIntPoint(8,13),FIntPoint(13,19),FIntPoint(15,23),
@@ -76,6 +82,7 @@ void AGridPawn::StartEncounter()
 
 FString AGridPawn::LevelObjective() const
 {
+    // 根据当前进度返回 HUD 要显示的目标提示文本。
     if(bLevelComplete) return TEXT("晶核已带回营地，通关！按 F5 重新挑战。");
     if(Health<=0) return TEXT("你已倒下，即将在营地重生；晶核掉落在原处。");
     if(bRelicCarried) return TEXT("携带晶核返回绿色营地，靠近后按 F 撤离；无需消灭所有守卫。");
@@ -84,12 +91,14 @@ FString AGridPawn::LevelObjective() const
 
 bool AGridPawn::LevelFireImpact(AActor* Actor)
 {
+    // 光柱等关卡标记物不会被火球引燃。
     for(const auto& A:LevelBeacons) if(A.Get()==Actor) return true;
     return false;
 }
 
 void AGridPawn::InteractLevel()
 {
+    // 靠近目标并按 F：拿到晶核触发警报，或把晶核带回营地判定通关。
     if(bLevelComplete || Health<=0) return;
     const FIntPoint Goal=bRelicCarried?PlayerSpawnCell:RelicCell;
     if(FVector::Dist2D(GetActorLocation(),GridRules::Center(Goal))>GridRules::CellSize*1.5f
@@ -102,13 +111,14 @@ void AGridPawn::InteractLevel()
     }
     bRelicCarried=true; LevelStage=1;
     if(LevelBeacons[0].IsValid()) { LevelBeacons[0]->SetActorHiddenInGame(true); LevelBeacons[0]->SetActorEnableCollision(false); }
-    // Local alarm draws nearby guards, while distant patrols keep their own information.
+    // 局部警报只惊动晶核附近的守卫，远处的巡逻者仍只掌握自己已知的信息。
     for(auto& T:Targets) if(T.Health>0 && GridRules::Distance(T.Cell,RelicCell)<=12)
     { T.AlertTime=12.f; T.LastKnownPlayer=CurrentCell; }
 }
 
 void AGridPawn::TickLevel(float DT)
 {
+    // 关卡主循环：计时、死亡掉落晶核、并刷新目标光柱与指引光柱。
     if(!bLevelComplete) LevelSeconds+=FMath::Max(0.f,DT);
     if(Health<=0 && bRelicCarried)
     {
@@ -133,9 +143,10 @@ void AGridPawn::TickLevel(float DT)
 
 bool AGridPawn::EnemySeesPlayer(const FTarget& T) const
 {
-    // The entrance is a reading space; shooting or entering the camp starts the fight.
+    // 入口是「安全阅读区」：开火或踏入营地才会真正触发战斗。
     if(LevelStage==0 && GridRules::Cell(GetActorLocation()).X<4 && T.AlertTime<=0.f) return false;
-    if(!T.Actor.IsValid() || Health<=0 || FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())>5.f*GridRules::CellSize) return false;
+    // 超过十格的守卫保持失明；进入半径内仍需一条无遮挡的视线。
+    if(!T.Actor.IsValid() || Health<=0 || FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())>10.f*GridRules::CellSize) return false;
     FCollisionQueryParams Params; Params.AddIgnoredActor(this);
     for(const auto& Other:Targets) if(Other.Actor.IsValid()) Params.AddIgnoredActor(Other.Actor.Get());
     FHitResult Hit;
@@ -144,6 +155,8 @@ bool AGridPawn::EnemySeesPlayer(const FTarget& T) const
 
 void AGridPawn::TickLevelCombatants(float DeltaSeconds)
 {
+    // 关卡守卫状态机：看到玩家就进入追击，近距离挥剑；看不到就做短途巡逻；
+    // 站在火里会逃跑，倒地/通关时直接停下。
     const float DT=FMath::Max(0.f,DeltaSeconds);
     if(bLevelComplete) return;
     if(Health<=0)
@@ -153,6 +166,7 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
         if(RespawnRemaining<=0 && FindSpawnCell(PlayerSpawnCell,true,Safe)) RespawnPlayer(Safe);
         return;
     }
+    RebuildOccupancy();
     for(int32 I=0;I<Targets.Num();++I)
     {
         auto& T=Targets[I]; if(T.Health<=0 || !T.Actor.IsValid()) continue;
@@ -161,6 +175,7 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
         T.SlashRemaining=FMath::Max(0.f,T.SlashRemaining-DT);
         T.AlertTime=FMath::Max(0.f,T.AlertTime-DT);
         if(EnemySeesPlayer(T)) { T.AlertTime=8.f; T.LastKnownPlayer=GridRules::Cell(GetActorLocation()); }
+        // 刚发现玩家的守卫会向三格内的同伴喊话，把警报扩散出去。
         if(T.AlertTime>7.9f) for(auto& Other:Targets)
             if(Other.Health>0 && GridRules::Distance(Other.Cell,T.Cell)<=3) { Other.AlertTime=FMath::Max(Other.AlertTime,4.f); Other.LastKnownPlayer=T.LastKnownPlayer; }
         if(T.Windup>0.f)
@@ -200,6 +215,7 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
             auto IsBurning=[this](FIntPoint C)
             { for(const auto& B:BurningCells) if(B.Cell==C && B.Remaining>0) return true; return false; };
             bool bEscaping=false;
+            // 脚下着火就先往最近的未燃格跑；残血时反而会朝玩家方向逃，把战火带回给你。
             if(T.FootHeight<GridRules::GroundTolerance && IsBurning(T.Cell))
             {
                 float Best=MAX_flt;
@@ -214,20 +230,21 @@ void AGridPawn::TickLevelCombatants(float DeltaSeconds)
             }
             if(!bEscaping && T.AlertTime>0)
             {
-                if(FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())<=GridRules::CellSize+10 && FMath::Abs(T.FootHeight-FootHeight)<=100)
+                // 追击：够近就直接挥剑，够远就寻路逼近，被高台挡住时改成拆墙。
+                if(FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())<=GridRules::CellSize+GridRules::MeleeReachExtra && FMath::Abs(T.FootHeight-FootHeight)<=GridRules::MeleeReachHeight)
                 { Next=PlayerCell; bAttack=true; }
                 else if(EnemyNextStep(I,true,Next) && SurfaceHeight(Next)>T.FootHeight+GridRules::LevelStepHeight) { bAttack=true; bWall=true; }
             }
             else if(!bEscaping)
             {
-                // Short local patrol: no global knowledge of the player's position.
+                // 短途巡逻：只知道锚点，没有玩家位置的全局信息。
                 FIntPoint Patrol=T.HomeCell+FIntPoint(0,(int32(LevelSeconds/3)+I)%2?1:-1);
                 if(LevelBlocked(Patrol) || LevelHeight(Patrol)!=LevelHeight(T.HomeCell) || T.Cell==Patrol) Patrol=T.HomeCell;
                 EnemyNextStep(I,false,Next,&Patrol);
             }
             if(bAttack && T.AttackCooldown<=0)
             {
-                T.StrikeCell=Next; T.bStrikeWall=bWall; T.Windup=.45f;
+                T.StrikeCell=Next; T.bStrikeWall=bWall; T.Windup=GridRules::MeleeWindup;
                 T.Actor->SetActorRotation(FRotator(0,(GridRules::Center(Next)-T.Actor->GetActorLocation()).Rotation().Yaw,0));
             }
             else if(!bAttack && Next!=T.Cell && Next!=PlayerCell && !(bMoving && Next==Destination)

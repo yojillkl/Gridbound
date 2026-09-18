@@ -6,8 +6,11 @@
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
 
+// 敌人 AI：生成、重生选点、寻路（Dijkstra）、占位查询、劈砍结算与每帧状态机推进。
+
 bool AGridPawn::SpawnWarrior(FIntPoint Cell)
 {
+    // 在指定格生成一名持剑敌人（冒险者模型 + 独立剑体）。
     if(!GridRules::Inside(Cell)) return false;
     FTarget T; T.Cell=Cell; T.HomeCell=Cell; T.MoveDestination=Cell; T.FootHeight=SurfaceHeight(Cell);
     T.Actor=MakeBlock(GridRules::Center(Cell,T.FootHeight+GridRules::ActorOriginHeight),FVector(.65f,.65f,1.5f),FLinearColor(.9f,.12f,.07f));
@@ -29,6 +32,7 @@ bool AGridPawn::SpawnWarrior(FIntPoint Cell)
 
 bool AGridPawn::FindSpawnCell(FIntPoint Preferred,bool bForPlayer,FIntPoint& Result) const
 {
+    // 在首选格附近找一块安全、可站立的空地板：避开敌人、火焰与高台。
     int32 Best=MAX_int32;
     for(int32 X=0;X<GridRules::BoardSize;++X) for(int32 Y=0;Y<GridRules::BoardSize;++Y)
     {
@@ -56,30 +60,42 @@ void AGridPawn::RespawnPlayer(FIntPoint Cell)
     SelectedSkill=INDEX_NONE; bHasAim=false; bValidAim=false; AimEnemy=INDEX_NONE;
     for(float& Cooldown:Cooldowns) Cooldown=0;
     SetActorLocation(GridRules::Center(Cell,GridRules::ActorOriginHeight));
-    // Give the returning player a full attack interval to react.
+    // 给重生的玩家留出一整个攻击间隔来反应。
     for(auto& T:Targets) T.AttackCooldown=GridRules::SlashCooldown;
     Feedback=TEXT("已重生：生命值 100｜按 Q、E、R 选择法术");
 }
 
 bool AGridPawn::EnemyCellOccupied(FIntPoint Cell,int32 Self) const
 {
-    for(int32 I=0;I<Targets.Num();++I) if(I!=Self)
+    // 查询某格是否被「其他」敌人占据（自身不算），直接查每帧重建的占位表。
+    const int32* Who=OccupiedBy.Find(Cell);
+    return Who && *Who!=Self;
+}
+
+void AGridPawn::RebuildOccupancy()
+{
+    // 每个战斗帧开头重建 格->敌人索引 快照，让后续占位查询是 O(1)。
+    OccupiedBy.Reset();
+    for(int32 I=0;I<Targets.Num();++I)
     {
         const auto& T=Targets[I];
-        if(T.Health>0 && T.Actor.IsValid() && (T.Cell==Cell || (T.bWalking && T.MoveDestination==Cell))) return true;
+        if(T.Health<=0 || !T.Actor.IsValid()) continue;
+        OccupiedBy.Add(T.Cell,I);
+        if(T.bWalking) OccupiedBy.Add(T.MoveDestination,I);
     }
-    return false;
 }
 
 bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const FIntPoint* GoalOverride) const
 {
+    // 用 Dijkstra 求敌人到目标格的下一步；bAllowWalls 允许把拆墙也算进路径代价。
     const auto& T=Targets[Index];
     const FIntPoint Goal=GoalOverride?*GoalOverride:(bLevelMode?T.LastKnownPlayer:GridRules::Cell(GetActorLocation()));
     if(T.Cell==Goal) return false;
-    TArray<FIntPoint> Open; Open.Add(T.Cell);
-    TMap<FIntPoint,FIntPoint> Parents; Parents.Add(T.Cell,T.Cell);
-    TMap<FIntPoint,float> Costs; Costs.Add(T.Cell,0.f);
-    TSet<FIntPoint> Closed;
+    auto& Open=PathScratch.Open; Open.Reset(); Open.Reserve(256);
+    auto& Parents=PathScratch.Parents; Parents.Reset(); Parents.Reserve(256);
+    auto& Costs=PathScratch.Costs; Costs.Reset(); Costs.Reserve(256);
+    auto& Closed=PathScratch.Closed; Closed.Reset(); Closed.Reserve(256);
+    Open.Add(T.Cell); Parents.Add(T.Cell,T.Cell); Costs.Add(T.Cell,0.f);
     const FIntPoint Directions[]={FIntPoint(1,0),FIntPoint(-1,0),FIntPoint(0,1),FIntPoint(0,-1)};
     while(!Open.IsEmpty())
     {
@@ -90,6 +106,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
         Closed.Add(From);
         if(From==Goal)
         {
+            // 回溯父链，把第一步（而非终点）作为返回值交给移动逻辑。
             Next=From;
             while(Parents[Next]!=T.Cell) Next=Parents[Next];
             return true;
@@ -97,10 +114,12 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
         for(const FIntPoint Direction:Directions)
         {
             const FIntPoint To=From+Direction;
+            // 越界、已闭合、被敌人占据、被关卡阻挡、或撞上玩家正在走的格都跳过。
             if(!GridRules::Inside(To) || Closed.Contains(To) || EnemyCellOccupied(To,Index)) continue;
             if(bLevelMode && LevelBlocked(To)) continue;
             if(bMoving && To==Destination && To!=Goal) continue;
             const float FromHeight=From==T.Cell?T.FootHeight:SurfaceHeight(From);
+            // 高差超过可迈高度时需要拆墙；把「要劈几下」折算成额外时间代价。
             const bool bNeedsDemolition=SurfaceHeight(To)>FromHeight+(bLevelMode?GridRules::LevelStepHeight:GridRules::MaxStepHeight);
             float Cost=GridRules::WarriorStepSeconds/MovementSpeedMultiplier(To,SurfaceHeight(To));
             if(bNeedsDemolition)
@@ -110,6 +129,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
                 if(!Wall) continue;
                 Cost+=FMath::CeilToFloat(float(Wall->Durability)/GridRules::SlashDemolition)*(GridRules::SlashCooldown+.45f);
             }
+            // 关卡中避开燃烧地面：残血时更不愿穿火。
             if(bLevelMode) for(const auto& B:BurningCells)
                 if(B.Cell==To && B.Remaining>0 && SurfaceHeight(To)<GridRules::GroundTolerance) Cost+=T.Health<=30?30.f:8.f;
             const float Candidate=Costs[From]+Cost;
@@ -122,6 +142,7 @@ bool AGridPawn::EnemyNextStep(int32 Index,bool bAllowWalls,FIntPoint& Next,const
 
 bool AGridPawn::TryWarriorSlash(int32 Index,int32 WallIndex)
 {
+    // 结算一次劈砍：要么砍玩家、要么拆土柱，需满足距离、高差与视线三条件。
     if(!Targets.IsValidIndex(Index) || Health<=0) return false;
     auto& T=Targets[Index];
     if(T.Health<=0 || !T.Actor.IsValid() || T.bWalking || T.AttackCooldown>0.f) return false;
@@ -129,12 +150,14 @@ bool AGridPawn::TryWarriorSlash(int32 Index,int32 WallIndex)
     if(bWall && !Walls.IsValidIndex(WallIndex)) return false;
     const FVector Origin=T.Actor->GetActorLocation();
     const FVector End=bWall?GridRules::Center(Walls[WallIndex].Cell,T.FootHeight+GridRules::ActorOriginHeight):GetActorLocation();
-    if(FVector::Dist2D(Origin,End)>GridRules::CellSize+10.f) return false;
+    if(FVector::Dist2D(Origin,End)>GridRules::CellSize+GridRules::MeleeReachExtra) return false;
     if(bWall)
     {
+        // 只有高到迈不上去的土柱才需要拆。
         if(SurfaceHeight(Walls[WallIndex].Cell)<=T.FootHeight+GridRules::MaxStepHeight) return false;
     }
-    else if(FMath::Abs(T.FootHeight-FootHeight)>100.f) return false;
+    else if(FMath::Abs(T.FootHeight-FootHeight)>GridRules::MeleeReachHeight) return false;
+    // 视线被地形挡住就不出手。
     FCollisionQueryParams Params; Params.AddIgnoredActor(T.Actor.Get()); Params.AddIgnoredActor(this);
     if(bWall) Params.AddIgnoredActor(Walls[WallIndex].Actor.Get());
     FHitResult Hit;
@@ -169,6 +192,7 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
         return;
     }
     if(!bAnyAlive) return;
+    RebuildOccupancy();
     for(int32 I=0;I<Targets.Num();++I)
     {
         auto& T=Targets[I];
@@ -176,7 +200,21 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
         T.AttackCooldown=FMath::Max(0.f,T.AttackCooldown-DT);
         T.SlashRemaining=FMath::Max(0.f,T.SlashRemaining-DT);
         T.ThinkTime=FMath::Max(0.f,T.ThinkTime-DT);
-        if(T.bWalking)
+        if(T.Windup>0.f)
+        {
+            // 已锁定的攻击先预警，让玩家来得及离开被标记的格。
+            T.Windup=FMath::Max(0.f,T.Windup-DT);
+            DrawCell(T.StrikeCell,FColor::Orange);
+            if(T.Windup<=0.f)
+            {
+                int32 WallIndex=INDEX_NONE;
+                if(T.bStrikeWall) for(int32 W=0;W<Walls.Num();++W) if(Walls[W].Cell==T.StrikeCell) { WallIndex=W; break; }
+                if((T.bStrikeWall && WallIndex!=INDEX_NONE) || (!T.bStrikeWall && GridRules::Cell(GetActorLocation())==T.StrikeCell))
+                    TryWarriorSlash(I,WallIndex);
+                T.AttackCooldown=GridRules::SlashCooldown;
+            }
+        }
+        else if(T.bWalking)
         {
             const bool bBlocked=SurfaceHeight(T.MoveDestination)>T.FootHeight+GridRules::MaxStepHeight
                 || EnemyCellOccupied(T.MoveDestination,I)
@@ -195,30 +233,38 @@ void AGridPawn::TickCombatants(float DeltaSeconds)
                 if(Alpha>=1.f) { T.Cell=T.MoveDestination; T.bWalking=false; }
             }
         }
-        if(!T.bWalking && !TryWarriorSlash(I))
+        else if(T.ThinkTime<=0.f)
         {
-            // Re-plan on a think cadence; the slash attempt above stays per-tick so attacks
-            // stay responsive while pathfinding drops to a handful of runs per second.
-            if(T.ThinkTime<=0.f)
+            // 按思考节拍做决策；攻击经预警延迟生效，而不是瞬间命中。
+            T.ThinkTime=.2f+I*.025f;
+            FIntPoint Next;
+            const FIntPoint PlayerCell=GridRules::Cell(GetActorLocation());
+            bool bAttack=false,bWall=false;
+            if(EnemyNextStep(I,false,Next) || EnemyNextStep(I,true,Next))
             {
-                T.ThinkTime=.2f+I*.025f;
-                FIntPoint Next;
-                if(EnemyNextStep(I,false,Next) || EnemyNextStep(I,true,Next))
+                if(SurfaceHeight(Next)>T.FootHeight+GridRules::MaxStepHeight)
                 {
-                    if(SurfaceHeight(Next)>T.FootHeight+GridRules::MaxStepHeight)
-                    {
-                        for(int32 W=0;W<Walls.Num();++W) if(Walls[W].Cell==Next) { TryWarriorSlash(I,W); break; }
-                    }
-                    else if(Next!=GridRules::Cell(GetActorLocation()) && !(bMoving && Next==Destination))
-                    {
-                        T.MoveDestination=Next; T.MoveProgress=0; T.bWalking=true;
-                        T.Actor->SetActorRotation(FRotator(0,FVector(Next.X-T.Cell.X,Next.Y-T.Cell.Y,0).Rotation().Yaw,0));
-                    }
+                    bAttack=true; bWall=true;
                 }
+                else if(FVector::Dist2D(T.Actor->GetActorLocation(),GetActorLocation())<=GridRules::CellSize+GridRules::MeleeReachExtra
+                    && FMath::Abs(T.FootHeight-FootHeight)<=GridRules::MeleeReachHeight)
+                {
+                    Next=PlayerCell; bAttack=true;
+                }
+            }
+            if(bAttack && T.AttackCooldown<=0.f)
+            {
+                T.StrikeCell=Next; T.bStrikeWall=bWall; T.Windup=GridRules::MeleeWindup;
+                T.Actor->SetActorRotation(FRotator(0,(GridRules::Center(Next)-T.Actor->GetActorLocation()).Rotation().Yaw,0));
+            }
+            else if(!bAttack && Next!=PlayerCell && !(bMoving && Next==Destination))
+            {
+                T.MoveDestination=Next; T.MoveProgress=0; T.bWalking=true;
+                T.Actor->SetActorRotation(FRotator(0,FVector(Next.X-T.Cell.X,Next.Y-T.Cell.Y,0).Rotation().Yaw,0));
             }
         }
         if(T.Sword.IsValid())
-            T.Sword->SetRelativeRotation(FRotator(T.SlashRemaining>0.f?FMath::Lerp(65.f,-70.f,T.SlashRemaining/.25f):-25.f,0,0));
+            T.Sword->SetRelativeRotation(FRotator(T.Windup>0.f?-65.f:T.SlashRemaining>0.f?FMath::Lerp(65.f,-70.f,T.SlashRemaining/.25f):-25.f,0,0));
         if(Health<=0) break;
     }
 }

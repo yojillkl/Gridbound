@@ -4,9 +4,11 @@
 #include "Components/BoxComponent.h"
 #include "Engine/World.h"
 
+// 程序化美术实现：FFacets 是一个小型网格构建器，所有资产都由它拼出低多边形硬边面片。
+
 namespace
 {
-    // Each triangle owns its vertices and normal: deliberately hard, low-poly facets.
+    // 每个三角形都独占自己的顶点与法线：刻意做成硬朗的低多边形切面。
     struct FFacets
     {
         TArray<FVector> Vertices, Normals;
@@ -61,6 +63,7 @@ namespace
 
 AActor* GridArt::CreateMud(UWorld* World,FIntPoint Cell,UMaterialInterface* Material)
 {
+    // 泥地：深色泥面 + 几个水洼 + 散落的石块，砂石底色的泥地会偏干偏亮。
     AActor* Actor=World->SpawnActor<AActor>();
     FFacets Art; FRandomStream Random(Cell.X*317+Cell.Y*911);
     const bool bGravel=TerrainAt(Cell)==ETerrain::Gravel;
@@ -89,6 +92,7 @@ AActor* GridArt::CreateMud(UWorld* World,FIntPoint Cell,UMaterialInterface* Mate
 
 AActor* GridArt::CreateRain(UWorld* World,FIntPoint CenterCell,UMaterialInterface* Material)
 {
+    // 降雨：头顶的云层 + 三组错相下落的雨滴与地面水花，动画在 AnimateRain 里推进。
     AActor* Actor=World->SpawnActor<AActor>();
     FFacets Clouds;
     FRandomStream Random(CenterCell.X*129+CenterCell.Y*719);
@@ -111,7 +115,7 @@ AActor* GridArt::CreateRain(UWorld* World,FIntPoint CenterCell,UMaterialInterfac
         {
             if(!GridRules::Inside(Cell)) continue;
             const FVector P=GridRules::Center(Cell-CenterCell)+FVector(Random.FRandRange(-55,55),Random.FRandRange(-55,55),Random.FRandRange(180,420));
-            // Four-sided elongated droplets remain readable from every viewing angle.
+            // 四棱柱状的长雨滴从任何视角都清晰可辨。
             Drops.Rock(P,FVector(2.5f,2.5f,19),FLinearColor(.32f,.75f,1.15f),4);
             Drops.Rock(P,FVector(2.5f,2.5f,-5),FLinearColor(.12f,.4f,.75f),4);
             const FVector Ground(P.X,P.Y,4);
@@ -128,6 +132,7 @@ AActor* GridArt::CreateRain(UWorld* World,FIntPoint CenterCell,UMaterialInterfac
 
 void GridArt::AnimateRain(AActor* Actor,float Age)
 {
+    // 让三组雨滴错相循环下落，落到底部后触发水花显隐。
     TInlineComponentArray<UProceduralMeshComponent*> Meshes; Actor->GetComponents(Meshes);
     for(auto* Mesh:Meshes)
     {
@@ -140,6 +145,7 @@ void GridArt::AnimateRain(AActor* Actor,float Age)
 
 GridArt::ETerrain GridArt::TerrainAt(FIntPoint Cell)
 {
+    // 纯过程化的地图布局：中央草地、河道、砂石带交错，用坐标直接判定。
     if(Cell.Y>=9 && Cell.Y<=11 && Cell.X>=9 && Cell.X<=11) return ETerrain::Grass;
     if(Cell.Y>=20 && Cell.Y<=22) return ETerrain::Gravel;
     if(Cell.X>=22 && Cell.X<=29 && Cell.Y>=14 && Cell.Y<=18) return ETerrain::Gravel;
@@ -152,7 +158,7 @@ GridArt::ETerrain GridArt::TerrainAt(FIntPoint Cell)
 bool GridArt::CliffAt(FIntPoint C)
 {
     if(C.X==0 || C.Y==0 || C.X==GridRules::BoardSize-1 || C.Y==GridRules::BoardSize-1) return true;
-    // Broken ridge: three passages connect both sides, with room to circle cover.
+    // 断裂的山脊：三条通道连接两侧，周围留有绕行空间。
     if(C.X==20 && ((C.Y>=5 && C.Y<=10) || (C.Y>=18 && C.Y<=21) || (C.Y>=25 && C.Y<=27))) return true;
     return (C.X==6 && (C.Y==7 || C.Y==14 || C.Y==23))
         || (C.X==16 && (C.Y==8 || C.Y==16 || C.Y==25))
@@ -161,11 +167,13 @@ bool GridArt::CliffAt(FIntPoint C)
 
 bool GridArt::PlatformAt(FIntPoint C)
 {
+    // 遗迹平台占据右下角一片固定区域。
     return C.X>=26 && C.X<=29 && C.Y>=14 && C.Y<=18;
 }
 
 UProceduralMeshComponent* GridArt::CreateStone(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,float Height)
 {
+    // 石柱/悬崖块：八边形侧面 + 顶部收口，高度由调用方决定。
     FFacets Art;
     const FVector2D Corners[]={{-67,-75},{67,-75},{75,-67},{75,67},{67,75},{-67,75},{-75,67},{-75,-67}};
     for(int32 I=0;I<8;++I)
@@ -179,6 +187,7 @@ UProceduralMeshComponent* GridArt::CreateStone(AActor* Owner,USceneComponent* Pa
 
 UProceduralMeshComponent* GridArt::CreateBeacon(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,FLinearColor Color)
 {
+    // 光柱标记：底座 + 立柱 + 顶部发光宝石，颜色区分晶核（金）与营地（绿）。
     FFacets Art;
     Art.Cylinder(FVector(0,0,-60),28,24,18,FLinearColor(.25f,.3f,.34f));
     Art.Cylinder(FVector(0,0,-42),12,12,55,FLinearColor(.45f,.4f,.24f));
@@ -190,8 +199,8 @@ UProceduralMeshComponent* GridArt::CreateBeacon(AActor* Owner,USceneComponent* P
 
 UProceduralMeshComponent* GridArt::CreateFireball(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material)
 {
+    // 火球：多切面的余烬核心 + 层层收窄的火焰尾，局部 +X 是飞行方向。
     FFacets Art;
-    // A faceted ember core and nested, tapered flame tails. Local +X is travel direction.
     for(int32 I=0;I<8;++I)
     {
         const float A=2*PI*I/8, B=2*PI*(I+1)/8;
@@ -209,10 +218,11 @@ UProceduralMeshComponent* GridArt::CreateFireball(AActor* Owner,USceneComponent*
 
 UProceduralMeshComponent* GridArt::CreateEarthPillar(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,FIntPoint Cell,int32 Durability)
 {
+    // 土柱：倒角的方环形土层叠成，保留平整可站立顶部与一格的清晰占地；
+    // 耐久越低，裂纹与剥落越明显。
     FFacets Art;
     FRandomStream Random(Cell.X*731+Cell.Y*173+51);
     const float Damage=1.f-FMath::Clamp(Durability/100.f,0.f,1.f);
-    // Chamfered square rings retain a flat walkable top and a readable one-cell footprint.
     const FVector2D Outline[]={{-62,-75},{62,-75},{75,-62},{75,62},{62,75},{-62,75},{-75,62},{-75,-62}};
     for(int32 Layer=0;Layer<6;++Layer)
     {
@@ -226,14 +236,14 @@ UProceduralMeshComponent* GridArt::CreateEarthPillar(AActor* Owner,USceneCompone
             const FLinearColor Base=FLinearColor(.43f,.26f,.115f)*Random.FRandRange(.78f,1.17f)*(1-.25f*Damage);
             Art.Triangle(A,B,Mid,Base*.8f); Art.Triangle(B,C,Mid,Base);
             Art.Triangle(C,D,Mid,Base*1.13f); Art.Triangle(D,A,Mid,Base*.92f);
-            // A dark mortar seam between earthen strata.
+            // 土层之间加一道深色灰缝。
             if(Layer>0) Art.Quad(A,B,B+FVector(0,0,3),A+FVector(0,0,3),Base*.53f);
         }
     }
     for(int32 Side=0;Side<8;++Side)
         Art.Triangle(FVector(0,0,225),FVector(Outline[Side].X,Outline[Side].Y,225),
             FVector(Outline[(Side+1)%8].X,Outline[(Side+1)%8].Y,225),FLinearColor(.58f,.39f,.19f));
-    // Branching black cracks on all four sides grow with demolition damage.
+    // 四面蔓延的黑色裂纹随拆毁伤害增长。
     if(Durability<100)
     {
         for(int32 Side=0;Side<4;++Side)
@@ -268,6 +278,7 @@ UProceduralMeshComponent* GridArt::CreateEarthPillar(AActor* Owner,USceneCompone
 
 AActor* GridArt::CreateBurningGrass(UWorld* World,FIntPoint Cell,UMaterialInterface* Material)
 {
+    // 燃烧草地：焦黑地表 + 成簇的火焰，火焰组件带 GridFlame 标签供动画与显隐控制。
     AActor* Actor=World->SpawnActor<AActor>();
     FFacets Ground,Flames;
     FRandomStream Random(Cell.X*617+Cell.Y*43);
@@ -296,6 +307,7 @@ AActor* GridArt::CreateBurningGrass(UWorld* World,FIntPoint Cell,UMaterialInterf
 
 void GridArt::AnimateBurningGrass(AActor* Actor,float Age)
 {
+    // 火焰随年龄上下呼吸缩放。
     TInlineComponentArray<UProceduralMeshComponent*> Meshes;
     Actor->GetComponents(Meshes);
     for(auto* Mesh:Meshes) if(Mesh->ComponentHasTag(TEXT("GridFlame")))
@@ -304,6 +316,7 @@ void GridArt::AnimateBurningGrass(AActor* Actor,float Age)
 
 void GridArt::CreateRubble(UWorld* World,FIntPoint Cell,UMaterialInterface* Material)
 {
+    // 碎石：土柱倒塌后的一小堆碎块，两秒后自动消失。
     AActor* Actor=World->SpawnActor<AActor>();
     FFacets Art; FRandomStream Random(Cell.X*417+Cell.Y*77);
     for(int32 I=0;I<12;++I)
@@ -315,12 +328,13 @@ void GridArt::CreateRubble(UWorld* World,FIntPoint Cell,UMaterialInterface* Mate
 
 AActor* GridArt::CreateTile(UWorld* World,FIntPoint Cell,UMaterialInterface* Material)
 {
+    // 单格地表：草地/河道/砂石三选一，附一个用于瞄准命中的不可见碰撞地板。
     AActor* Actor=World->SpawnActor<AActor>();
     const ETerrain Type=TerrainAt(Cell);
     FRandomStream Random(Cell.X*9176+Cell.Y*347+1327);
     const FLinearColor Base=Type==ETerrain::Grass ? FLinearColor(.16f,.42f,.07f) : Type==ETerrain::River ? FLinearColor(.025f,.39f,.48f) : FLinearColor(.62f,.44f,.22f);
     FFacets Art;
-    // Subtle per-tile palette changes and thin dark seams retain readable grid units.
+    // 每格轻微的色差与细暗缝，让网格单元依然清晰可读。
     const float TileShade=Random.FRandRange(.93f,1.06f);
     constexpr int32 Subdivisions=4;
     for(int32 X=0;X<Subdivisions;++X) for(int32 Y=0;Y<Subdivisions;++Y)
@@ -331,7 +345,7 @@ AActor* GridArt::CreateTile(UWorld* World,FIntPoint Cell,UMaterialInterface* Mat
         Art.Triangle(A,B,C,Base*TileShade*Random.FRandRange(.9f,1.1f));
         Art.Triangle(A,C,D,Base*TileShade*Random.FRandRange(.9f,1.1f));
     }
-    // Beveled earthen edge is visual only; a continuous invisible floor is used for targeting.
+    // 倒角的土边只作视觉装饰；瞄准命中靠的是连续的不可见地板。
     const FLinearColor Edge=Base*.62f;
     Art.Quad(FVector(-74.5,-74.5,1),FVector(-74.5,-74.5,-22),FVector(74.5,-74.5,-22),FVector(74.5,-74.5,1),Edge);
     Art.Quad(FVector(74.5,-74.5,1),FVector(74.5,-74.5,-22),FVector(74.5,74.5,-22),FVector(74.5,74.5,1),Edge);
@@ -379,10 +393,11 @@ AActor* GridArt::CreateTile(UWorld* World,FIntPoint Cell,UMaterialInterface* Mat
 
 UProceduralMeshComponent* GridArt::CreateAdventurer(AActor* Owner,USceneComponent* Parent,UMaterialInterface* Material,bool bEnemy)
 {
+    // 冒险者小人：由腿部、躯干、头盔与披风拼成，敌人用红色布料、玩家用蓝色。
     FFacets Art;
     const FLinearColor Cloth=bEnemy ? FLinearColor(.65f,.12f,.08f):FLinearColor(.045f,.24f,.34f);
     const FLinearColor Leather(.16f,.095f,.045f),Steel(.48f,.58f,.6f),Skin(.75f,.47f,.25f);
-    // Local origin is at the old pawn's center (75 cm above ground).
+    // 局部原点在旧 pawn 的中心（地面上方 75 厘米）。
     for(float Y:{-11.f,11.f})
     {
         Art.Cylinder(FVector(0,Y,-72),9,8,14,Leather);
@@ -395,7 +410,7 @@ UProceduralMeshComponent* GridArt::CreateAdventurer(AActor* Owner,USceneComponen
     Art.Cylinder(FVector(0,0,23),12,14,22,Skin);
     Art.Cylinder(FVector(0,0,43),17,11,15,Steel);
     Art.Rock(FVector(0,0,58),FVector(11,11,7),Steel);
-    // Front is +X: dark visor and brass buckle give orientation cues.
+    // 正面朝 +X：深色面罩和黄铜扣环给出朝向线索。
     Art.Quad(FVector(14,-10,37),FVector(14,10,37),FVector(14,10,43),FVector(14,-10,43),FLinearColor(.025f,.04f,.045f));
     Art.Quad(FVector(21,-4,-23),FVector(21,4,-23),FVector(21,4,-18),FVector(21,-4,-18),FLinearColor(.85f,.57f,.15f));
     Art.Quad(FVector(-23,-19,15),FVector(-34,-25,-50),FVector(-34,25,-50),FVector(-23,19,15),Cloth*.72f);

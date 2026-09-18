@@ -7,13 +7,17 @@
 #include "Engine/World.h"
 #include "Engine/DamageEvents.h"
 
+// 环境系统：施法原点、地表高度、角色升降、土柱生命周期、火球结算与燃烧/泥地。
+
 FVector AGridPawn::SpellOrigin() const
 {
+    // 法术射线从眼睛高度出发。
     return GetActorLocation()+FVector(0,0,GridRules::EyeHeight-GridRules::ActorOriginHeight);
 }
 
 float AGridPawn::SurfaceHeight(FIntPoint Cell) const
 {
+    // 地表高度：有土柱时取它当前升起的高度，否则取关卡地形（竞技场为 0）。
     for(const auto& Wall:Walls) if(Wall.Cell==Cell && Wall.Actor.IsValid() && Wall.Durability>0)
         return GridRules::WallHeight*FMath::Clamp(Wall.Age/GridRules::WallRiseTime,.005f,1.f);
     return bLevelMode?LevelHeight(Cell):0.f;
@@ -21,6 +25,7 @@ float AGridPawn::SurfaceHeight(FIntPoint Cell) const
 
 void AGridPawn::UpdateElevation(float DeltaSeconds)
 {
+    // 每帧用「地表支撑 + 重力」驱动玩家和敌人的垂直位置；支撑高于脚底就直接托起。
     const float DT=FMath::Max(0.f,DeltaSeconds);
     auto FollowSupport=[DT](float Support,float& Height,float& Speed)
     {
@@ -31,11 +36,11 @@ void AGridPawn::UpdateElevation(float DeltaSeconds)
             Speed=Height<=Support?0.f:Speed+GridRules::Gravity*DT;
         }
     };
-    // Physical XY determines support; logical cells continue to determine combat occupancy.
+    // 物理 XY 决定支撑面；逻辑格继续决定战斗占位。
     const float Support=SurfaceHeight(GridRules::Cell(GetActorLocation()));
     if(Support>FootHeight+.01f)
     {
-        // A newly rising pillar lifts the pawn even during a jump.
+        // 正在升起的土柱会把角色托起来，哪怕此刻正在跳跃中。
         FootHeight=Support; FallSpeed=0.f; bJumping=false;
     }
     else if(bJumping || FootHeight>Support+.01f)
@@ -59,6 +64,7 @@ void AGridPawn::UpdateElevation(float DeltaSeconds)
 
 void AGridPawn::TickWalls(float DeltaSeconds)
 {
+    // 推进每根土柱的计时：按升起曲线长高，到期则移除。
     const float DT=FMath::Max(0.f,DeltaSeconds);
     for(int32 I=Walls.Num()-1;I>=0;--I)
     {
@@ -73,6 +79,7 @@ void AGridPawn::TickWalls(float DeltaSeconds)
 
 void AGridPawn::RemoveWall(int32 Index)
 {
+    // 移除一根土柱并留下一堆碎石装饰。
     if(!Walls.IsValidIndex(Index)) return;
     auto& Wall=Walls[Index];
     GridArt::CreateRubble(GetWorld(),Wall.Cell,TerrainMaterial?TerrainMaterial.Get():BaseMaterial.Get());
@@ -82,6 +89,7 @@ void AGridPawn::RemoveWall(int32 Index)
 
 void AGridPawn::DamageWall(int32 Index,int32 Demolition)
 {
+    // 削减土柱耐久，耐久归零则移除；否则按剩余耐久重建它的外观。
     if(!Walls.IsValidIndex(Index) || Demolition<=0) return;
     auto& Wall=Walls[Index];
     Wall.Durability=FMath::Max(0,Wall.Durability-Demolition);
@@ -96,19 +104,19 @@ void AGridPawn::DamageWall(int32 Index,int32 Demolition)
 
 void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
 {
+    // 火球命中后的统一结算：依次判断角色、土柱、地形，按类型分流。
     if(!HitActor) return;
     if(bLevelMode && LevelFireImpact(HitActor)) return;
-    // Character damage and object demolition never share a health pool or application path.
+    // 角色伤害与物件拆毁从不共用生命池，也走不同的结算路径。
     for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.Get()==HitActor)
     {
         Target.Health=FMath::Max(0,Target.Health-GridRules::FireballDamage);
         Target.AlertTime=8.f; Target.LastKnownPlayer=GridRules::Cell(GetActorLocation());
         if(Target.Health==0) HitActor->Destroy();
-        Feedback=TEXT("火球命中：造成 50 伤害");
+        Feedback=FString::Printf(TEXT("火球命中：造成 %d 伤害"),GridRules::FireballDamage);
         return;
     }
-    // Unreachable today: the fireball cannot strike the player who cast it, and no
-    // second player exists to be hit. Kept as a defensive fallback.
+    // 目前不可达：火球无法命中施法者自己，也没有第二名玩家可打。作为防御性兜底保留。
     if(auto* Character=Cast<AGridPawn>(HitActor))
     {
         Character->TakeDamage(GridRules::FireballDamage,FDamageEvent(),GetController(),this);
@@ -117,18 +125,19 @@ void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
     for(int32 I=0;I<Walls.Num();++I) if(Walls[I].Actor.Get()==HitActor)
     {
         DamageWall(I,GridRules::FireballDemolition);
-        Feedback=TEXT("火球命中：造成 50 土柱拆毁值");
+        Feedback=FString::Printf(TEXT("火球命中：造成 %d 土柱拆毁值"),GridRules::FireballDemolition);
         return;
     }
     if(HitActor->ActorHasTag(TEXT("GridTerrain")))
     {
-        // Prefer the hit tile's own cell so a seam impact cannot ignite a neighbouring river tile.
+        // 优先取命中地块自身的格，避免打在接缝处时误点燃相邻的河道格。
         IgniteCell(GridRules::Cell(HitActor->GetActorLocation()));
     }
 }
 
 bool AGridPawn::IgniteCell(FIntPoint Cell)
 {
+    // 点燃草地：只在草地、非泥地且未被关卡阻挡的格生效；已在燃烧则续期。
     if(!GridRules::Inside(Cell) || (bLevelMode && LevelBlocked(Cell)) || GridArt::TerrainAt(Cell)!=GridArt::ETerrain::Grass) return false;
     for(const auto& Mud:MuddyCells) if(Mud.Cell==Cell && Mud.Remaining>0.f) return false;
     for(auto& Burning:BurningCells) if(Burning.Cell==Cell)
@@ -153,9 +162,9 @@ bool AGridPawn::IgniteCell(FIntPoint Cell)
 
 void AGridPawn::TickBurning(float DeltaSeconds)
 {
+    // 燃烧系统：给站在火上的角色累计伤害、推进火焰动画，并在燃尽后恢复地表。
     const float DT=FMath::Max(0.f,DeltaSeconds);
-    // Damage fractions only accrue while standing on a live fire; a stale fraction
-    // from a fire the character has already left must not leak into the next ignite.
+    // 小数伤害只会在「正站在活火上」时累积；角色离开后残留的零头不能泄漏到下一次点燃。
     auto StillBurning=[this](FIntPoint Cell)
     {
         for(const auto& B:BurningCells) if(B.Cell==Cell && B.Remaining>0.f) return true;
@@ -184,7 +193,7 @@ void AGridPawn::TickBurning(float DeltaSeconds)
             const int32 Damage=FMath::FloorToInt(Fraction+.00001f);
             Fraction=FMath::Max(0.f,Fraction-Damage); return Damage;
         };
-        // Raised characters are above the flames, not standing on the burning floor.
+        // 站在高处的角色在火焰上方，不算踩在燃烧的地板上。
         if(Health>0 && CurrentCell==Burning.Cell && FootHeight<=GridRules::GroundTolerance)
             TakeDamage(Burn(BurnFraction),FDamageEvent(),nullptr,nullptr);
         for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.IsValid()
@@ -212,12 +221,15 @@ void AGridPawn::TickBurning(float DeltaSeconds)
             }
         }
     }
+    // 驱动「站在火上」的全屏橙色反馈，平滑淡入淡出，避免闪跳。
+    const bool bOnFire=Health>0 && FootHeight<=GridRules::GroundTolerance && StillBurning(CurrentCell);
+    BurnOverlay=FMath::FInterpTo(BurnOverlay,bOnFire?1.f:0.f,DT,8.f);
 }
 
 void AGridPawn::SetupCombatShowcase()
 {
 #if !UE_BUILD_SHIPPING
-    // Opt-in deterministic visual QA; ordinary play never creates this scene.
+    // 供视觉 QA 使用的确定性展示场景；正常游玩永远不会创建它。
     CurrentCell=FIntPoint(1,4); Destination=CurrentCell;
     SetActorLocation(GridRules::Center(CurrentCell,GridRules::ActorOriginHeight));
     bWallAlongX=false; PlaceWall(FIntPoint(6,4)); TickWalls(.4f); UpdateElevation(.4f);

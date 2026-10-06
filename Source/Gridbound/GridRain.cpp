@@ -3,6 +3,7 @@
 #include "Components/PrimitiveComponent.h"
 #include "Engine/World.h"
 #include "Engine/OverlapResult.h"
+#include "DrawDebugHelpers.h"
 #include "GameFramework/PlayerController.h"
 
 // 降雨系统：地形显隐、泥地减速、土墙可放置判定、降雨施法与湿地形/雨水动画。
@@ -26,13 +27,13 @@ TArray<FIntPoint> AGridPawn::PlaceableWallCells(FIntPoint CenterCell) const
 {
     // 计算某中心格下土墙实际能放的格：排除越界、超距、被占据、视线被挡的格。
     TArray<FIntPoint> Result;
-    if(!GridRules::Inside(CenterCell) || GridRules::Distance(CurrentCell,CenterCell)>GridRules::WallRange) return Result;
+    if(!GridRules::Inside(CenterCell) || FVector::Dist2D(GetActorLocation(),GridRules::Center(CenterCell))>GridRules::WallRange*GridRules::CellSize) return Result;
     FCollisionQueryParams Params; Params.AddIgnoredActor(this);
     // 角色会被土墙托起来，所以它们不是建造时的障碍。
     for(const auto& Target:Targets) if(Target.Actor.IsValid()) Params.AddIgnoredActor(Target.Actor.Get());
     for(const FIntPoint Cell:GridRules::WallCells(CenterCell,bWallAlongX))
     {
-        if(!GridRules::Inside(Cell) || GridRules::Distance(CurrentCell,Cell)>GridRules::WallRange) continue;
+        if(!GridRules::Inside(Cell) || FVector::Dist2D(GetActorLocation(),GridRules::Center(Cell))>GridRules::WallRange*GridRules::CellSize) continue;
         if(bLevelMode && (LevelBlocked(Cell) || LevelHeight(Cell)>0.f)) continue;
         bool bOccupied=false;
         for(const auto& Wall:Walls) if(Wall.Actor.IsValid() && Wall.Cell==Cell) { bOccupied=true; break; }
@@ -53,7 +54,7 @@ TArray<FIntPoint> AGridPawn::PlaceableWallCells(FIntPoint CenterCell) const
 bool AGridPawn::CanCastRain(FIntPoint CenterCell) const
 {
     // 降雨能否施放：在射程内，且中心格（含其上的土柱顶）有清晰视线。
-    if(!GridRules::Inside(CenterCell) || GridRules::Distance(CurrentCell,CenterCell)>GridRules::RainRange) return false;
+    if(!GridRules::Inside(CenterCell) || FVector::Dist2D(GetActorLocation(),GridRules::Center(CenterCell))>GridRules::RainRange*GridRules::CellSize) return false;
     const AActor* Occupant=nullptr;
     for(const auto& Target:Targets) if(Target.Health>0 && Target.Cell==CenterCell) Occupant=Target.Actor.Get();
     // 瞄准土柱时，以它可见的顶部作为降雨的目标点。
@@ -78,19 +79,20 @@ void AGridPawn::MakeMud(FIntPoint Cell)
 
 bool AGridPawn::CastRain(FIntPoint CenterCell)
 {
-    // 施放降雨：覆盖范围内的焦土、砂石与已有泥地全部变成泥地。
+    // 先验证落点，降雨不会移除已存在的土墙。
     if(!CanCastRain(CenterCell)) return false;
     for(const FIntPoint Cell:GridRules::RainCells(CenterCell))
     {
         if(!GridRules::Inside(Cell)) continue;
-        bool bBurnt=false,bMuddy=false;
-        for(const auto& Burning:BurningCells) if(Burning.Cell==Cell) { bBurnt=true; break; }
-        for(const auto& Mud:MuddyCells) if(Mud.Cell==Cell) { bMuddy=true; break; }
-        if(bBurnt || bMuddy || GridArt::TerrainAt(Cell)==GridArt::ETerrain::Gravel) MakeMud(Cell);
+        if(!bLevelMode || !LevelBlocked(Cell)) MakeMud(Cell);
     }
-    FRainEffect Rain;
+    FRainEffect Rain; Rain.Center=CenterCell;
+    const auto Cells=GridRules::RainCells(CenterCell);
+    for(auto& T:Targets) if(T.Health>0 && T.Actor.IsValid() && Cells.Contains(GridRules::Cell(T.Actor->GetActorLocation())))
+    { T.WetRemaining=GridRules::WetLifetime; }
     Rain.Actor=GridArt::CreateRain(GetWorld(),CenterCell,TerrainMaterial?TerrainMaterial.Get():BaseMaterial.Get());
     RainEffects.Add(Rain);
+    RainEffectRemaining=GridRules::RainVisualLifetime;
     return true;
 }
 
@@ -98,6 +100,20 @@ void AGridPawn::TickWetTerrain(float DeltaSeconds)
 {
     // 湿地形计时：泥地到期恢复草地，雨水动画到期销毁。
     const float DT=FMath::Max(0.f,DeltaSeconds);
+    for(auto& T:Targets)
+    {
+        T.WetRemaining=FMath::Max(0.f,T.WetRemaining-DT);
+        if(T.WetRemaining>0.f && T.Health>0 && T.Actor.IsValid())
+        {
+            const FVector P=T.Actor->GetActorLocation();
+            for(int32 I=0;I<4;++I)
+            {
+                const float A=I*PI*.5f,Height=FMath::Fmod(T.WetRemaining*50.f+I*25.f,100.f)-35.f;
+                const FVector Drop=P+FVector(FMath::Cos(A)*27,FMath::Sin(A)*27,Height);
+                DrawDebugLine(GetWorld(),Drop,Drop+FVector(0,0,10),FColor(60,170,255),false,0,0,2);
+            }
+        }
+    }
     for(int32 I=MuddyCells.Num()-1;I>=0;--I)
     {
         auto& Mud=MuddyCells[I]; Mud.Remaining-=DT;
@@ -109,11 +125,20 @@ void AGridPawn::TickWetTerrain(float DeltaSeconds)
     }
     for(int32 I=RainEffects.Num()-1;I>=0;--I)
     {
-        auto& Rain=RainEffects[I]; Rain.Age+=DT;
+        auto& Rain=RainEffects[I]; const float PreviousAge=Rain.Age; Rain.Age+=DT;
+        if(PreviousAge<GridRules::RainVisualLifetime)
+        {
+            const auto Cells=GridRules::RainCells(Rain.Center);
+            const float Wet=FMath::Max(0.f,GridRules::WetLifetime-FMath::Max(0.f,Rain.Age-GridRules::RainVisualLifetime));
+            for(auto& T:Targets) if(T.Health>0 && T.Actor.IsValid()
+                && Cells.Contains(GridRules::Cell(T.Actor->GetActorLocation())))
+            { T.WetRemaining=FMath::Max(T.WetRemaining,Wet); }
+        }
         if(Rain.Age>=GridRules::RainVisualLifetime || !Rain.Actor.IsValid())
         {
             if(Rain.Actor.IsValid()) Rain.Actor->Destroy();
             RainEffects.RemoveAtSwap(I);
+            if(RainEffects.IsEmpty()) Cooldowns[2]=GridRules::RainCooldown;
         }
         else GridArt::AnimateRain(Rain.Actor.Get(),Rain.Age);
     }

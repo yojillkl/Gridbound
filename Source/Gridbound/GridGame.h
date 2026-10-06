@@ -5,6 +5,7 @@
 #include "GameFramework/Pawn.h"
 #include "GameFramework/GameModeBase.h"
 #include "GameFramework/HUD.h"
+#include "GridCharacterStats.h"
 #include "GridGame.generated.h"
 
 class UProceduralMeshComponent;
@@ -13,19 +14,43 @@ namespace GridRules
 {
     constexpr float CellSize = 150.f;          // 单格边长（厘米），所有位置与距离都以它为单位
     constexpr int32 BoardSize = 32;            // 棋盘为 32×32 格
-    constexpr int32 MaxHealth = 100;           // 玩家与敌人的生命上限
+    constexpr int32 MaxHealth = Wizard.MaxHP();
     constexpr int32 FireballDamage = 50;       // 火球命中角色造成的伤害
+    constexpr int32 FireboltDamage = 12;
+    constexpr float FireboltCooldown = .7f;
     constexpr int32 FireballDemolition = 50;   // 火球命中土柱造成的拆毁值
     constexpr int32 WallDurability = 100;      // 单根土柱的耐久
-    constexpr float WallLifetime = 60.f;       // 土柱存在的秒数
+    constexpr float WallLifetime = 10.f;       // 土墙最长持续时间
     constexpr float WallRiseTime = .35f;       // 土柱从地面升起到顶的时间
     constexpr float BurnLifetime = 10.f;       // 草地燃烧时长
     constexpr float BurnDamagePerSecond = 10.f; // 站在火上的每秒伤害
+    constexpr int32 SkillCount = 4;
+    constexpr int32 WizardLevel = Wizard.Level;
+    constexpr int32 MaxSpellSlots[3] = {4,3,2};
+    constexpr int32 SpellLevels[4] = {3,1,1,2};
+    constexpr int32 SpellSaveDC = Wizard.DC(EAbility::Intelligence);
+    constexpr int32 PlayerAC = Wizard.UnarmoredAC();
+    constexpr float RoundSeconds = 6.f;
+    constexpr float SpellActionSeconds = 1.f; // Real-time action pacing, not tabletop turns.
+    constexpr float SpellWindups[4] = {.8f,0.f,.3f,.8f};
+    constexpr float BackwardSpeedScale = .75f;
+    constexpr float CastingSpeedScale = .3f;
+    constexpr float ReactionWindow = .65f;
+    constexpr float FireballBlastRadius = 300.f;
+    constexpr float ThunderSize = 450.f;
+    constexpr float HoldRange = 1800.f;
+    constexpr int32 LightningDamage = FireballDamage;
+    constexpr float WetLifetime = 3.f; // 离开雨区或降雨结束后的潮湿余效
+    constexpr float ElectricLifetime = BurnLifetime;
+    constexpr float ElectricDamagePerSecond = BurnDamagePerSecond;
+    constexpr int32 ConductRadius = 3;
     constexpr float EyeHeight = 130.f;
     constexpr float ActorOriginHeight = 75.f; // 角色的根节点位于脚底上方 75 厘米
     constexpr float GroundTolerance = 3.f;    // 脚底低于此高度即视为站在地面上
     constexpr float JumpHeight = 320.f; // 跳跃顶点；能越过 300 厘米的遗迹柱顶，从而直接跳上石柱
     constexpr float JumpApexSeconds = .41f;   // 到达顶点的时间，跳跃速度与重力由它推导
+    constexpr float JumpBufferSeconds = .15f; // 落地前提前按跳跃的容错时间
+    constexpr float CoyoteSeconds = .12f;     // 走出边缘后仍可起跳的时间
     constexpr float JumpSpeed = 2.f * JumpHeight / JumpApexSeconds;
     constexpr float JumpGravity = 2.f * JumpHeight / (JumpApexSeconds * JumpApexSeconds);
     constexpr float Gravity = 980.f;
@@ -33,34 +58,49 @@ namespace GridRules
     constexpr float MaxStepHeight = 20.f;     // 贴地角色可直接跨上的最大高差（竞技场）
     constexpr float LevelStepHeight = 80.f;   // 敌人在关卡中可攀爬比玩家更高的地形
     constexpr float MovementChordWindow = .06f; // 两个方向键被判定为同一次斜向输入的时间窗
-    constexpr int32 SlashDamage = 20;         // 一次劈砍对玩家造成的伤害
     constexpr int32 SlashDemolition = 10;     // 一次劈砍对土柱造成的拆毁值
     constexpr float SlashCooldown = 1.f;      // 两次劈砍之间的冷却
     constexpr float MeleeReachExtra = 10.f;   // 劈砍超过一格的水平余量
     constexpr float MeleeReachHeight = 100.f; // 劈砍的垂直容差
     constexpr float MeleeWindup = .45f;       // 劈砍命中前的预警时间
+    constexpr float LevelMeleeWindup = .6f;   // 群战中留足一格闪避时间
+    constexpr float AttackSpacing = .4f;      // 同伴错开起手，避免同时结算多次伤害
     constexpr float WarriorStepSeconds = .45f; // 敌人走一格的时间
+    constexpr int32 WarriorLevel = Fighter.Level;
+    constexpr int32 WarriorHealth = Fighter.MaxHP();
+    constexpr int32 WarriorSaveDC = Fighter.DC(EAbility::Strength);
+    constexpr int32 PlayerStrengthSave = Wizard.Save(EAbility::Strength);
+    constexpr float WarriorSpeed = 390.f;
+    constexpr float CharacterMoveRadius = 24.f; // 行走碰撞独立于模型与法术命中盒。
+    constexpr float WarriorRadius = CharacterMoveRadius;
+    constexpr float ChargeSpeed = WarriorSpeed*2.f;
+    constexpr float ChargeRange = 900.f;
+    constexpr float ChargeCooldown = 8.f;
+    constexpr float EnemySightRange = 18.f * CellSize;
+    constexpr float EnemyTrackingRange = 24.f * CellSize;
+    constexpr float EnemyMemorySeconds = 15.f;
+    constexpr float EnemySearchSeconds = 6.f;
     constexpr float PlayerRespawnDelay = 2.f;  // 玩家死亡后等待重生的秒数
     inline FIntPoint MovementInput(bool Forward, bool Back, bool Left, bool Right)
     { return FIntPoint(int32(Forward)-int32(Back),int32(Right)-int32(Left)); }
-    inline FIntPoint MoveDirection(float Yaw, FIntPoint Input)
+    inline FVector WorldMoveDirection(float Yaw, FVector2D Input)
     {
-        // 把「前后左右」输入按镜头朝向旋转，并量化到最近的八方向之一。
-        if(Input==FIntPoint::ZeroValue) return FIntPoint::ZeroValue;
-        const FVector Desired=FRotator(0,Yaw,0).RotateVector(FVector(Input.X,Input.Y,0));
-        const float Angle=FMath::RoundToInt(FMath::Atan2(Desired.Y,Desired.X)/(PI/4.f))*(PI/4.f);
-        return FIntPoint(FMath::RoundToInt(FMath::Cos(Angle)),FMath::RoundToInt(FMath::Sin(Angle)));
+        // 不量化角度；W 始终沿镜头的水平朝向，组合输入保持等速。
+        return FRotator(0,Yaw,0).RotateVector(FVector(Input.X,Input.Y,0)).GetSafeNormal2D();
     }
-    constexpr float FireballRange = 9.f * CellSize; // 火球飞行上限；比 10 格的索敌半径少一格
+    constexpr float FireballRange = 4500.f;
     constexpr float FireballSpeed = 1800.f;         // 火球飞行速度
     constexpr float FireballRadius = 18.f;          // 火球碰撞半径
+    constexpr float LightningRange = 1350.f;
+    constexpr float LightningRadius = 10.f;
+    constexpr float LightningCooldown = 3.f;
     constexpr int32 WallRange = 10;   // 土墙中心距离玩家的最大格数
     constexpr int32 RainRadius = 4;   // 降雨覆盖半径（格）
     constexpr int32 RainRange = 10;   // 降雨施法距离（格）
     constexpr float FireballCooldown = 3.f; // 火球是常驻输出，冷却短但也不能乱放
     constexpr float WallCooldown = 10.f;    // 土墙改变地形，放置它需要权衡
     constexpr float RainCooldown = 10.f;    // 降雨灭火并减速一大片，属于一次性决策
-    constexpr float RainVisualLifetime = 3.f; // 降雨动画的持续时间
+    constexpr float RainVisualLifetime = 8.f; // 降雨最长持续时间
     constexpr float TerrainRecovery = 60.f;   // 焦土/泥地恢复原貌的时间
     inline TArray<FIntPoint> RainCells(FIntPoint CenterCell)
     {
@@ -98,27 +138,106 @@ public:
         AController* EventInstigator, AActor* DamageCauser) override;
     UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category="Gridbound|Combat")
     int32 Health = GridRules::MaxHealth;
+    // 连续世界坐标是玩家移动、距离与交互的唯一权威位置。
+    FVector PlayerWorldPosition = FVector(450.f,1500.f,GridRules::ActorOriginHeight);
+    // 仅供旧地形资源查询的兼容缓存，不参与移动或距离计算。
     FIntPoint CurrentCell = FIntPoint(3,10);
     FIntPoint AimCell = FIntPoint::ZeroValue;
     bool bHasAim = false;
     bool bValidAim = false;
     int32 AimEnemy = INDEX_NONE;
-    // 按 Q、E、R 之前没有任何法术被选中。
+    // Q / E / R / F 选择技能，左键确认施放。
     int32 SelectedSkill = INDEX_NONE;
+    int32 SpellSlots[3] = {4,3,2};
+    int32 CastLevels[4] = {3,1,1,2};
+    float ActionRemaining=0.f;
+    int32 PendingCastSkill=INDEX_NONE;
+    int32 PendingCastLevel=0;
+    float CastWindupRemaining=0.f;
+    TArray<TWeakObjectPtr<AActor>> PendingCastTargets;
+    float ShieldRemaining=0.f;
+    float ReactionRemaining=0.f;
+    float ConcentrationRemaining=0.f;
+    float WallEffectRemaining=0.f;
+    float RainEffectRemaining=0.f;
+    float FireboltCooldownRemaining=0.f;
     bool bWallAlongX = false;
-    float Cooldowns[3] = {0.f,0.f,0.f};
-    FString Feedback = TEXT("Q 火球术｜E 土墙术｜R 降雨术｜左键施放");
+    float Cooldowns[GridRules::SkillCount] = {};
+    FString Feedback = TEXT("法术已就绪");
+    struct FCombatReadout {
+        bool bPlayer=true;
+        FString Title,Formula,Result;
+        int32 Value=0,Sides=0;
+        float Age=0.f;
+        FString Details;
+    };
+    TArray<FCombatReadout> CombatReadouts;
+    int32 CombatReadoutSerial=0;
+    void AddCombatReadout(bool bPlayer,const FString& Title,const FString& Formula,const FString& Result,int32 Value,int32 Sides=0,const FString& Details=FString());
+    void TickCombatReadouts(float DeltaSeconds);
     // 单个敌人；AI 是在 TickCombatants 里驱动的小型状态机。
+    enum class EWarriorIntent : uint8 { Patrol, Chase, Flank, Search, Retreat, Recover };
+    enum class EWarriorSkill : uint8 { Slash, SecondWind, ActionSurge, Charge, Trip, Push };
     struct FTarget {
-        FIntPoint Cell;                              // 当前占据的逻辑格
+        bool bHumanoid=true;
+        int32 DexteritySave=GridRules::Fighter.Save(GridRules::EAbility::Dexterity);
+        int32 ConstitutionSave=GridRules::Fighter.Save(GridRules::EAbility::Constitution);
+        int32 WisdomSave=GridRules::Fighter.Save(GridRules::EAbility::Wisdom);
+        int32 AttackBonus=GridRules::Fighter.Attack(GridRules::EAbility::Strength);
+        float HoldRemaining=0.f;
+        float HoldSaveRemaining=GridRules::RoundSeconds;
+        TWeakObjectPtr<AActor> HoldVisual;
+        FIntPoint Cell;                              // 连续世界位置对应的地形缓存
         int32 Health=100;                            // 自己的生命，与玩家独立
+        int32 MaxHealth=100;
+        bool bDuelist=false;
+        int32 Level=GridRules::WarriorLevel;
+        int32 SecondWindUses=3;
+        int32 SuperiorityDice=4;
+        float SecondWindCooldown=0.f;
+        float TacticalShiftRemaining=0.f;
+        FVector TacticalShiftGoal=FVector::ZeroVector;
+        bool bPreferPush=false;
+        bool bActionSurgeUsed=false;
+        bool bSurgeFollowup=false;
+        EWarriorSkill Skill=EWarriorSkill::Slash;
+        EWarriorSkill ReleasedSkill=EWarriorSkill::Slash;
+        float SkillRecoveryRemaining=0.f;
+        float SkillRecoveryDuration=.3f;
+        int32 AnimationStrikeNumber=0;
+        int32 ReleasedStrikeNumber=0;
+        float ChargeCooldown=0.f;
+        float TripCooldown=0.f;
+        int32 StrikesRemaining=0;
+        FVector MoveGoal=FVector::ZeroVector;
+        FVector LastKnownPosition=FVector::ZeroVector;
+        FVector ObservedPlayerVelocity=FVector::ZeroVector;
+        FVector LastSeenDirection=FVector::ForwardVector;
+        FVector SearchGoal=FVector::ZeroVector;
+        bool bSearchingArea=false;
+        bool bHasSearchGoal=false;
+        float SearchRemaining=0.f;
+        float StuckTime=0.f;
+        bool bPathBlocked=false;
+        FVector StrikeDirection=FVector::ForwardVector;
+        FVector ChargeEnd=FVector::ZeroVector;
+        bool bHasObservation=false;
+        bool bCharging=false;
+        float ChargeRemaining=0.f;
+        float RetreatTime=0.f;
+        float DodgeCooldown=0.f;
+        float TacticRemaining=0.f;
+        float OrbitSign=1.f;
+        float SkillWindupDuration=.6f;
         TWeakObjectPtr<AActor> Actor;                // 视觉代理（冒险者 + 剑）
         float FootHeight=0.f;                        // 脚底相对格面地表的高度
         float FallSpeed=0.f;                         // 悬空时的垂直速度
         float BurnFraction=0.f;                      // 本帧累积的小数火焰伤害
+        float WetRemaining=0.f;
+        float ElectricFraction=0.f;
         FIntPoint MoveDestination=FIntPoint::ZeroValue;
         float MoveProgress=0.f;                      // 当前步进 0..1
-        bool bWalking=false;                         // 正在从 Cell 走向 MoveDestination
+        bool bWalking=false;                         // 本帧发生了连续水平移动
         float AttackCooldown=GridRules::SlashCooldown;
         float SlashRemaining=0.f;                    // 挥剑动画计时
         FIntPoint HomeCell=FIntPoint::ZeroValue;     // 关卡模式下的巡逻锚点
@@ -128,7 +247,19 @@ public:
         FIntPoint LastKnownPlayer=FIntPoint::ZeroValue;
         FIntPoint StrikeCell=FIntPoint::ZeroValue;   // 本次劈砍将要命中的格
         bool bStrikeWall=false;                      // 为真表示本次劈砍目标是土柱
+        bool bFlanker=false;                         // 游击守卫选择侧翼，其他守卫正面施压
+        bool bSeesPlayer=false;
+        float SenseTime=0.f;
+        float ShoutCooldown=0.f;
+        float StaggerRemaining=0.f;
+        int32 SearchStep=0;
+        int32 PatrolStep=0;
+        EWarriorIntent Intent=EWarriorIntent::Patrol;
         TWeakObjectPtr<class UStaticMeshComponent> Sword;
+        TWeakObjectPtr<class UProceduralMeshComponent> Visual;
+        float AnimationTime=0.f;
+        FVector PreviousVisualPosition=FVector::ZeroVector;
+        float VisualSpeed=0.f;
     };
     TArray<FTarget> Targets;
     UPROPERTY(EditAnywhere, Category="Gridbound|Spawning")
@@ -140,20 +271,55 @@ public:
     float MouseSensitivity = 0.26f;
     float MovementSpeedMultiplier(FIntPoint Cell, float FeetHeight) const;
 private:
+    friend class FSkillAnimationTest;
     friend class AGridHUD;
-    struct FFireball { TWeakObjectPtr<AActor> Actor; FVector Direction; float Remaining=GridRules::FireballRange; }; // Remaining：剩余飞行距离
+    friend class FGridTacticsTest;
+    friend class FFreeHeadingMovementTest;
+    friend class FWarriorDuelTest;
+    friend class FWarriorPerceptionTest;
+    friend class FMageDuelTest;
+    friend class FWizardBalanceTest;
+    friend class FCombatReadoutTest;
+    friend class FLightningSpellTest;
+    struct FSpellTrace {
+        FVector End=FVector::ZeroVector;
+        FVector ImpactPoint=FVector::ZeroVector;
+        TWeakObjectPtr<AActor> HitActor;
+        TArray<int32> Enemies;
+        bool bGroundImpact=false;
+    };
+    struct FElectricCell { FIntPoint Cell; float Remaining=GridRules::ElectricLifetime; float Age=0.f; TWeakObjectPtr<AActor> Actor; };
+    struct FLightningEffect { TWeakObjectPtr<AActor> Actor; float Remaining=.35f; };
+    struct FFireball { TWeakObjectPtr<AActor> Actor; FVector Direction; float Remaining=GridRules::FireballRange; bool bCantrip=false; }; // Remaining：剩余飞行距离
     struct FWall { FIntPoint Cell; TWeakObjectPtr<AActor> Actor; int32 Durability=GridRules::WallDurability; float Remaining=GridRules::WallLifetime; float Age=0.f; TWeakObjectPtr<UProceduralMeshComponent> Visual; }; // 玩家召唤的土柱
     struct FBurningCell { FIntPoint Cell; float Remaining=GridRules::BurnLifetime; float Age=0.f; TWeakObjectPtr<AActor> Actor; float RecoveryRemaining=GridRules::TerrainRecovery; }; // 燃烧中的草地
     struct FMuddyCell { FIntPoint Cell; float Remaining=GridRules::TerrainRecovery; TWeakObjectPtr<AActor> Actor; }; // 降雨制造的泥地
-    struct FRainEffect { TWeakObjectPtr<AActor> Actor; float Age=0.f; }; // 降雨的纯视觉表现
+    struct FRainEffect { TWeakObjectPtr<AActor> Actor; float Age=0.f; FIntPoint Center=FIntPoint::ZeroValue; };
     // Dijkstra 的临时缓冲，跨 EnemyNextStep 调用复用，避免每帧分配内存。
     struct FPathScratch { TArray<FIntPoint> Open; TMap<FIntPoint,FIntPoint> Parents; TMap<FIntPoint,float> Costs; TSet<FIntPoint> Closed; };
     mutable FPathScratch PathScratch;
     TArray<FFireball> Fireballs;
+    struct FPendingAttack {
+        int32 Roll=0,Bonus=0,Damage=0;
+        bool bTrip=false;
+        bool bPush=false;
+        bool bPrecision=false;
+        int32 SaveDC=GridRules::WarriorSaveDC;
+        FVector PushDirection=FVector::ZeroVector;
+        float Remaining=GridRules::ReactionWindow;
+        TWeakObjectPtr<AActor> Source;
+    };
+    struct FSpellVisual { TWeakObjectPtr<AActor> Actor; float Remaining=0.f,Duration=0.f; int32 Skill=0; };
+    TArray<FPendingAttack> PendingAttacks;
+    TArray<FSpellVisual> SpellVisuals;
+    TWeakObjectPtr<AActor> ShieldVisual;
+    FRandomStream CombatRandom;
     TArray<FWall> Walls;
     TArray<FBurningCell> BurningCells;
     TArray<FMuddyCell> MuddyCells;
     TArray<FRainEffect> RainEffects;
+    TArray<FElectricCell> ElectricCells;
+    TArray<FLightningEffect> LightningEffects;
     TMap<FIntPoint,TWeakObjectPtr<AActor>> TerrainTiles;
     float FootHeight=0.f;       // 玩家脚底相对格面地表的高度
     float FallSpeed=0.f;        // 玩家悬空时的垂直速度
@@ -161,6 +327,11 @@ private:
     float DamageFlash=0.f;      // 0..1，受伤时的红色全屏反馈，在 Tick 里衰减
     float BurnOverlay=0.f;      // 0..1，站在燃烧地面上的橙色全屏反馈
     FVector AimPoint = FVector::ZeroVector; // 屏幕中心射线命中的瞄准点
+    FVector AimDirection = FVector::ForwardVector;
+    FSpellTrace AimTrace;
+    float AimDistance=0.f;
+    FString AimHint;
+    TArray<FIntPoint> ConductPlan;
     TArray<FIntPoint> WallPlan; // 在瞄准校验与每帧土墙预览之间复用的格子列表
     TMap<FIntPoint,int32> OccupiedBy; // 格 -> 敌人索引，每个战斗帧重建，用于 O(1) 的占位查询
     UPROPERTY() TObjectPtr<class UCameraComponent> Camera;
@@ -170,33 +341,55 @@ private:
     UPROPERTY() TObjectPtr<class UMaterialInterface> BaseMaterial;
     UPROPERTY() TObjectPtr<class UMaterialInterface> TerrainMaterial;
     UPROPERTY() TObjectPtr<class UProceduralMeshComponent> Adventurer;
-    FIntPoint Destination;      // 当前步进的目标格
-    float MoveTime = 0.f;       // 当前步进已消耗的时间
-    bool bMoving = false;       // 正在从 CurrentCell 走向 Destination
+    UPROPERTY() TObjectPtr<class UProceduralMeshComponent> CastingHands;
+    FIntPoint Destination;      // 兼容旧存档/关卡逻辑的邻近格缓存
+    float MoveTime = 0.f;
+    bool bMoving = false;       // 保留给敌人兼容层；玩家已改为连续移动
+    FVector MovementInput = FVector::ZeroVector;
+    float MovementSpeed = GridRules::WarriorSpeed;
+    float CharacterAnimationTime = 0.f;
+    float SpellCastAnimation = 0.f;
+    int32 CastingSkill = INDEX_NONE;
     bool bJumping = false;      // 处于空中；水平移动仍可用
+    float JumpBufferRemaining = 0.f;
+    float CoyoteRemaining = 0.f;
+    float TripRemaining = 0.f;
+    FVector KnockbackVelocity = FVector::ZeroVector;
     FIntPoint PendingMoveInput = FIntPoint::ZeroValue; // 缓存等待判定的方向输入
     bool bWaitingForMoveChord = false; // 正在缓冲两个方向键以合并成一次斜向输入
     float MoveChordAge = 0.f;   // 方向键合并缓冲已等待的时间
     float RespawnRemaining = 0.f; // 距离重生的剩余秒数
     bool bLevelMode=false;      // 关卡模式；否则为自由练习的竞技场
-    int32 LevelStage=0;         // 关卡阶段：0 拿晶核前，1 拿到后
-    bool bLevelComplete=false;  // 晶核已带回营地，通关
-    FIntPoint RelicCell=FIntPoint(27,16); // 晶核所在的格（死亡掉落时会更新）
-    bool bRelicCarried=false;   // 玩家当前是否携带晶核
+    bool bLevelComplete=false;  // 决斗战士被击败，通关
+    bool bEncounterStarted=false;
     float LevelSeconds=0.f;     // 本关已用时间（用于巡逻相位与结算）
     int32 LevelDeaths=0;        // 本关死亡次数
-    int32 LevelCasts[3]={0,0,0}; // 本关三种法术各施放次数
+    int32 LevelCasts[GridRules::SkillCount]={};
+    float EnemyAttackSpacing=0.f;
     TArray<TWeakObjectPtr<AActor>> LevelProps;   // 关卡生成的静态地形与装饰
-    TArray<TWeakObjectPtr<AActor>> LevelBeacons; // 晶核与营地的光柱标记
     void BuildLevel();
     void ResetLevel();
     void StartEncounter();
     void TickLevel(float DeltaSeconds);
     void TickLevelCombatants(float DeltaSeconds);
+    void TickWarriorBrain(int32 Index, float DeltaSeconds);
+    bool WarriorCanTraverse(int32 Index, FVector Start, FVector End, bool bAvoidFire=true) const;
+    bool MoveWarriorContinuous(int32 Index, FVector Goal, float DeltaSeconds, float Speed);
+    FVector AvoidWarriorBodies(int32 Index, FVector Position, FVector Delta) const;
+    bool WarriorPositionAllowed(int32 Index, FVector Position, float FromHeight) const;
+    bool WarriorBurning(FIntPoint Cell) const;
+    bool ChooseWarriorEscape(int32 Index, FVector& Goal, bool bAwayFromPlayer) const;
+    bool BeginWarriorCharge(int32 Index);
+    bool UseWarriorSecondWind(int32 Index);
+    void RememberWarriorPlayer(FTarget& Target, FVector Position);
+    bool ChooseWarriorSearchGoal(int32 Index);
     void InteractLevel();
     bool LevelBlocked(FIntPoint Cell) const;
     float LevelHeight(FIntPoint Cell) const;
-    bool LevelFireImpact(AActor* Actor);
+    void BeginWarriorAttack(FTarget& Target, FIntPoint Cell, bool bWall);
+    void ResolveWarriorSkill(int32 Index);
+    FString WarriorSkillHint(const FTarget& Target) const;
+    void TickPlayerControlEffects(float DeltaSeconds);
     bool EnemySeesPlayer(const FTarget& Target) const;
     FString LevelObjective() const;
     bool SpawnWarrior(FIntPoint Cell);
@@ -205,15 +398,50 @@ private:
     void RespawnPlayer(FIntPoint Cell);
     void RebuildOccupancy();
     bool EnemyCellOccupied(FIntPoint Cell, int32 Self) const;
-    bool EnemyNextStep(int32 Index, bool bAllowWalls, FIntPoint& Next, const FIntPoint* GoalOverride=nullptr) const;
+    bool EnemyNextStep(int32 Index, bool bAllowWalls, FIntPoint& Next, const FIntPoint* GoalOverride=nullptr,
+        FIntPoint* ReachableGoal=nullptr, bool bAllowPartial=true) const;
     bool TryWarriorSlash(int32 Index, int32 WallIndex=INDEX_NONE);
     void BuildArena();
     AActor* MakeBlock(FVector Location, FVector Scale, FLinearColor Color, bool bCollision=true);
     void UpdateAim();
+    void ComputeSkillAim(FVector Direction);
+    FSpellTrace TraceSpell(int32 Skill,FVector Direction) const;
+    float SkillRange(int32 Skill) const;
+    bool IsConductiveCell(FIntPoint Cell) const;
+    TArray<FIntPoint> ConductiveArea(FIntPoint Seed) const;
+    TArray<FIntPoint> LightningGroundPlan(const FSpellTrace& Trace) const;
+    void CastLightning(FVector Direction);
+    void ElectrifyCells(const TArray<FIntPoint>& Cells);
+    void TickElectricity(float DeltaSeconds);
+    void SetupLightningShowcase();
+    void DrawSkillPreview();
+    void AnimateWarrior(FTarget& Target, float DeltaSeconds);
     void CastSkill(int32 Skill);
-    void LaunchFireball(FVector Direction);
+    void ResetWizardState();
+    bool HasSpellSlot(int32 Skill) const;
+    void ChangeCastLevel(int32 Delta);
+    int32 RollDice(int32 Count,int32 Sides);
+    bool SpellSave(FTarget& Target,bool bDexterity,FString* Details=nullptr);
+    bool SpellVisible(FVector Origin,FVector End,const AActor* Target=nullptr) const;
+    void ExplodeFireball(FVector Center);
+    void CastThunderwave(FVector Direction,int32 Level);
+    void CastHoldPerson(const TArray<int32>& Enemies);
+    void EndConcentration();
+    void InterruptHeldTarget(FTarget& Target);
+    TArray<int32> ThunderTargets(FVector Direction) const;
+    bool QueueWarriorHit(int32 Index);
+    void ResolvePendingAttack(const FPendingAttack& Attack);
+    void CancelSpellCast();
+    void TickSpellCast(float DeltaSeconds);
+    void ReleaseSpellCast();
+    bool ActivateShield();
+    void SelectSkill(int32 Skill);
+    void CastFirebolt();
+    void TickMageState(float DeltaSeconds);
+    void ClearSustainedSpells();
+    void LaunchFireball(FVector Direction, bool bCantrip=false);
     void TickFireballs(float DeltaSeconds);
-    void ResolveFireballImpact(AActor* HitActor, FVector ImpactPoint);
+    void ResolveFireballImpact(AActor* HitActor, FVector ImpactPoint, bool bCantrip=false);
     void DamageWall(int32 Index, int32 Demolition);
     void RemoveWall(int32 Index);
     void TickWalls(float DeltaSeconds);
@@ -228,11 +456,9 @@ private:
     bool CastRain(FIntPoint CenterCell);
     void MakeMud(FIntPoint Cell);
     void TickWetTerrain(float DeltaSeconds);
-    void AdvanceMovement(float DeltaSeconds);
-    bool TryStartMove(FIntPoint Input, float Yaw);
-    void ProcessMovementInput(float DeltaSeconds, FIntPoint Input, bool bHasHeldInput, bool bNewPress, float Yaw);
-    bool CanStep(FIntPoint Step) const;
+    void MoveContinuous(float DeltaSeconds, FVector2D Input, float Yaw);
     bool TryJump();
+    void TickJumpInput(float DeltaSeconds);
     bool IsGrounded() const;
     void SetTerrainVisible(FIntPoint Cell, bool bVisible);
     TArray<FIntPoint> PlaceableWallCells(FIntPoint CenterCell) const;
@@ -250,6 +476,7 @@ class AGridHUD : public AHUD
 public:
     virtual void DrawHUD() override;
 private:
+    void DrawCombatReadouts(const AGridPawn* Pawn,float Scale,float Width,float Height);
     UPROPERTY() TObjectPtr<class UFont> ChineseFont;
 };
 

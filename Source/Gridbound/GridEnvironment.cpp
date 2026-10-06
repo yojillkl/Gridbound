@@ -53,6 +53,7 @@ void AGridPawn::UpdateElevation(float DeltaSeconds)
     }
     else { FootHeight=Support; FallSpeed=0.f; bJumping=false; }
     FVector Location=GetActorLocation(); Location.Z=FootHeight+GridRules::ActorOriginHeight; SetActorLocation(Location);
+    PlayerWorldPosition=Location;
     for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.IsValid())
     {
         FVector TargetLocation=Target.Actor->GetActorLocation();
@@ -102,36 +103,15 @@ void AGridPawn::DamageWall(int32 Index,int32 Demolition)
     Wall.Visual->SetWorldScale3D(FVector(1,1,FMath::Clamp(Wall.Age/GridRules::WallRiseTime,.005f,1.f)));
 }
 
-void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint)
+void AGridPawn::ResolveFireballImpact(AActor* HitActor,FVector ImpactPoint,bool bCantrip)
 {
-    // 火球命中后的统一结算：依次判断角色、土柱、地形，按类型分流。
-    if(!HitActor) return;
-    if(bLevelMode && LevelFireImpact(HitActor)) return;
-    // 角色伤害与物件拆毁从不共用生命池，也走不同的结算路径。
-    for(auto& Target:Targets) if(Target.Health>0 && Target.Actor.Get()==HitActor)
+    if(!bCantrip) { ExplodeFireball(ImpactPoint); return; }
+    for(auto& T:Targets) if(T.Health>0 && T.Actor.Get()==HitActor)
     {
-        Target.Health=FMath::Max(0,Target.Health-GridRules::FireballDamage);
-        Target.AlertTime=8.f; Target.LastKnownPlayer=GridRules::Cell(GetActorLocation());
-        if(Target.Health==0) HitActor->Destroy();
-        Feedback=FString::Printf(TEXT("火球命中：造成 %d 伤害"),GridRules::FireballDamage);
+        T.Health=FMath::Max(0,T.Health-GridRules::FireboltDamage);
+        RememberWarriorPlayer(T,GetActorLocation());
+        if(T.Health==0) HitActor->Destroy();
         return;
-    }
-    // 目前不可达：火球无法命中施法者自己，也没有第二名玩家可打。作为防御性兜底保留。
-    if(auto* Character=Cast<AGridPawn>(HitActor))
-    {
-        Character->TakeDamage(GridRules::FireballDamage,FDamageEvent(),GetController(),this);
-        return;
-    }
-    for(int32 I=0;I<Walls.Num();++I) if(Walls[I].Actor.Get()==HitActor)
-    {
-        DamageWall(I,GridRules::FireballDemolition);
-        Feedback=FString::Printf(TEXT("火球命中：造成 %d 土柱拆毁值"),GridRules::FireballDemolition);
-        return;
-    }
-    if(HitActor->ActorHasTag(TEXT("GridTerrain")))
-    {
-        // 优先取命中地块自身的格，避免打在接缝处时误点燃相邻的河道格。
-        IgniteCell(GridRules::Cell(HitActor->GetActorLocation()));
     }
 }
 
